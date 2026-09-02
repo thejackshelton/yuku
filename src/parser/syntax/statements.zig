@@ -16,6 +16,7 @@ const for_loop = @import("for_loop.zig");
 const modules = @import("modules.zig");
 const ts_types = @import("ts/types.zig");
 const ts_decl = @import("ts/statements.zig");
+const jsx = @import("jsx/root.zig");
 const parser_extension = @import("parser_extension");
 
 const ParseStatementOpts = struct {
@@ -23,6 +24,17 @@ const ParseStatementOpts = struct {
     /// where lexical declarations (`let`, `const`) are not allowed without a block.
     can_be_single_statement_context: bool = false,
 };
+
+/// Returns true when TSRX-compatible ASI separates line-leading JSX.
+pub fn canInsertSemicolonBeforeJSX(parser: *Parser) bool {
+    std.debug.assert(parser.current_token.span.start <= parser.current_token.span.end);
+    std.debug.assert(parser.current_token.span.end <= parser.source.len);
+
+    if (!parser.tree.isJsx()) return false;
+    if (parser.current_token.tag != .less_than) return false;
+    if (!parser.current_token.hasLineTerminatorBefore()) return false;
+    return jsx.isCommittedOpening(parser);
+}
 
 pub fn parseStatement(parser: *Parser, opts: ParseStatementOpts) Error!?ast.NodeIndex {
     parser.context.single_statement = opts.can_be_single_statement_context;

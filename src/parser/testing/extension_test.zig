@@ -88,3 +88,65 @@ test "handled positions carry the extension's own values" {
     defer failed.deinit();
     try std.testing.expect(failed.hasErrors());
 }
+
+test "hooked cover pattern keeps its parameter annotation" {
+    const source = "const f = (&{ a }: Result<T> | A): string => a;";
+    var tree = try parser.parse(std.testing.allocator, source, .{ .lang = .ts });
+    defer tree.deinit();
+    try std.testing.expect(!tree.hasErrors());
+
+    const arrow = tree.data(try firstNode(&tree, .arrow_function_expression))
+        .arrow_function_expression;
+    const parameters = tree.data(arrow.params).formal_parameters;
+    const items = tree.extra(parameters.items);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    const pattern = tree.data(tree.data(items[0]).formal_parameter.pattern).object_pattern;
+    try std.testing.expect(pattern.type_annotation != .null);
+    const annotation = tree.data(pattern.type_annotation).ts_type_annotation.type_annotation;
+    try std.testing.expectEqual(.ts_union_type, std.meta.activeTag(tree.data(annotation)));
+    try std.testing.expect(arrow.return_type != .null);
+}
+
+test "hooked cover pattern permits an arrow return annotation" {
+    const source = "const g = (&{ a }): R => a;";
+    var tree = try parser.parse(std.testing.allocator, source, .{ .lang = .ts });
+    defer tree.deinit();
+    try std.testing.expect(!tree.hasErrors());
+
+    const arrow = tree.data(try firstNode(&tree, .arrow_function_expression))
+        .arrow_function_expression;
+    const parameters = tree.data(arrow.params).formal_parameters;
+    const items = tree.extra(parameters.items);
+    try std.testing.expectEqual(@as(usize, 1), items.len);
+    const pattern = tree.data(tree.data(items[0]).formal_parameter.pattern).object_pattern;
+    try std.testing.expectEqual(ast.NodeIndex.null, pattern.type_annotation);
+    try std.testing.expect(arrow.return_type != .null);
+}
+
+test "hooked binding prefix stays binary after a left expression" {
+    var tree = try parser.parse(
+        std.testing.allocator,
+        "const result = source&{ value: 1 };",
+        .{ .lang = .ts },
+    );
+    defer tree.deinit();
+    try std.testing.expect(!tree.hasErrors());
+
+    const binary = tree.data(try firstNode(&tree, .binary_expression)).binary_expression;
+    try std.testing.expectEqual(ast.BinaryOperator.bitwise_and, binary.operator);
+    try std.testing.expectEqual(.identifier_reference, std.meta.activeTag(tree.data(binary.left)));
+    try std.testing.expectEqual(.object_expression, std.meta.activeTag(tree.data(binary.right)));
+}
+
+test "ordinary parenthesized expressions leave a ternary colon to the caller" {
+    var tree = try parser.parse(
+        std.testing.allocator,
+        "const result = condition ? ({ value: 1 }) : fallback;",
+        .{ .lang = .ts },
+    );
+    defer tree.deinit();
+    try std.testing.expect(!tree.hasErrors());
+
+    const conditional = tree.data(try firstNode(&tree, .conditional_expression));
+    try std.testing.expectEqual(.conditional_expression, std.meta.activeTag(conditional));
+}

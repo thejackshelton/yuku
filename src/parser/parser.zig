@@ -6,6 +6,7 @@ const ast = @import("ast.zig");
 const util = @import("util");
 
 const statements = @import("syntax/statements.zig");
+const ts_types = @import("syntax/ts/types.zig");
 const comments = @import("comments.zig");
 const parser_extension = @import("parser_extension");
 
@@ -281,6 +282,23 @@ pub const Parser = struct {
         }
 
         return self.flushToExtras(&self.scratch_statements, statements_checkpoint);
+    }
+
+    /// Parses a TypeScript annotation and attaches it to a binding pattern.
+    pub fn parseTypeAnnotation(
+        self: *Parser,
+        pattern: ast.NodeIndex,
+    ) Error!?ast.NodeIndex {
+        std.debug.assert(self.tree.isTs());
+        std.debug.assert(pattern != .null);
+        std.debug.assert(self.current_token.tag == .colon);
+
+        const annotation = try ts_types.parseTypeAnnotation(self) orelse return null;
+        ts_types.applyTypeAnnotationToPattern(self, pattern, annotation);
+
+        std.debug.assert(self.tree.span(pattern).end == self.tree.span(annotation).end);
+        std.debug.assert(self.current_token.tag != .colon);
+        return annotation;
     }
 
     inline fn isAtBodyEnd(self: *Parser, terminator: ?TokenTag) bool {

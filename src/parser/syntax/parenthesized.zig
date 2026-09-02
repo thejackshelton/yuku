@@ -10,6 +10,9 @@ const functions = @import("functions.zig");
 const expressions = @import("expressions.zig");
 const array = @import("array.zig");
 const object = @import("object.zig");
+const patterns = @import("patterns.zig");
+const ts = @import("ts/types/predicate.zig");
+const parser_extension = @import("parser_extension");
 
 /// cover grammar result for parenthesized expressions and arrow parameters.
 /// https://tc39.es/ecma262/#prod-CoverParenthesizedExpressionAndArrowParameterList
@@ -20,6 +23,12 @@ pub const ParenthesizedCover = struct {
     end: u32,
     /// trailing comma present (valid for arrow params, not for parenthesized expr)
     has_trailing_comma: bool,
+    return_type: ast.NodeIndex,
+};
+
+const CoverElement = struct {
+    node: ast.NodeIndex,
+    extension_binding: bool,
 };
 
 /// parse CoverParenthesizedExpressionAndArrowParameterList.
@@ -34,6 +43,7 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
 
     var end = start + 1;
     var has_trailing_comma = false;
+    var has_extension_binding = false;
 
     // empty parens: ()
     if (parser.current_token.tag == .right_paren) {
@@ -45,6 +55,7 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
             .start = start,
             .end = end,
             .has_trailing_comma = false,
+            .return_type = .null,
         };
     }
 
@@ -80,12 +91,12 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
         }
 
         // regular element
-        const element = try grammar.parseExpressionInCover(parser, Precedence.Assignment) orelse
-            return null;
+        const element = try parseCoverElement(parser) orelse return null;
 
-        try parser.scratch_cover.append(parser.allocator(), element);
+        try parser.scratch_cover.append(parser.allocator(), element.node);
 
-        end = parser.tree.span(element).end;
+        end = parser.tree.span(element.node).end;
+        has_extension_binding = has_extension_binding or element.extension_binding;
 
         // comma or end
         if (parser.current_token.tag == .comma) {
@@ -119,6 +130,13 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
 
     try parser.advance() orelse return null; // consume )
 
+    const return_type: ast.NodeIndex = if (has_extension_binding and
+        parser.tree.isTs() and
+        parser.current_token.tag == .colon)
+        try ts.parseReturnTypeAnnotation(parser) orelse return null
+    else
+        .null;
+
     const elements = try parser.flushToExtras(&parser.scratch_cover, checkpoint);
 
     return .{
@@ -126,7 +144,37 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
         .start = start,
         .end = end,
         .has_trailing_comma = has_trailing_comma,
+        .return_type = return_type,
     };
+}
+
+fn parseCoverElement(parser: *Parser) Error!?CoverElement {
+    std.debug.assert(parser.current_token.tag != .right_paren);
+    std.debug.assert(parser.current_token.tag != .eof);
+
+    if (extensionCanStartBinding(parser.current_token.tag)) {
+        const pattern = try patterns.parseBindingPattern(parser) orelse return null;
+        if (parser.tree.isTs() and parser.current_token.tag == .colon) {
+            const annotation = try ts.parseTypeAnnotation(parser) orelse return null;
+            ts.applyTypeAnnotationToPattern(parser, pattern, annotation);
+        }
+        return .{ .node = pattern, .extension_binding = true };
+    }
+
+    const expression = try grammar.parseExpressionInCover(
+        parser,
+        Precedence.Assignment,
+    ) orelse return null;
+    return .{ .node = expression, .extension_binding = false };
+}
+
+fn extensionCanStartBinding(tag: TokenTag) bool {
+    std.debug.assert(tag != .right_paren);
+    std.debug.assert(tag != .eof);
+    if (comptime @hasDecl(parser_extension, "can_start_binding")) {
+        if (parser_extension.can_start_binding(tag)) |value| return value;
+    }
+    return false;
 }
 
 /// convert cover to CallExpression.
@@ -213,8 +261,7 @@ pub fn coverToParenthesizedExpression(
 }
 
 /// converts the cover into `ArrowFunctionExpression` parameters and body.
-/// the cover path is js-only, since all ts arrows go through `parseArrow`,
-/// so no type parameters or return type need to thread through here.
+/// extension-owned binding starts reach this path before the ts arrow classifier.
 pub fn coverToArrowFunction(
     parser: *Parser,
     cover: ParenthesizedCover,
@@ -222,7 +269,7 @@ pub fn coverToArrowFunction(
     arrow_start: u32,
 ) Error!?ast.NodeIndex {
     const params = try convertToFormalParameters(parser, cover) orelse return null;
-    return buildArrowFunction(parser, params, is_async, arrow_start, .null, .null);
+    return buildArrowFunction(parser, params, is_async, arrow_start, .null, cover.return_type);
 }
 
 /// convert a single identifier to arrow function (x => body case).

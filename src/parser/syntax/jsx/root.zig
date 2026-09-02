@@ -27,6 +27,29 @@ inline fn exitJsxTag(parser: *Parser) void {
     parser.setLexerMode(.normal);
 }
 
+/// Returns true when `<` is immediately followed by an unambiguous JSX opening.
+pub fn isCommittedOpening(parser: *Parser) bool {
+    std.debug.assert(parser.current_token.span.start <= parser.current_token.span.end);
+    std.debug.assert(parser.current_token.span.end <= parser.source.len);
+
+    if (parser.current_token.tag != .less_than) return false;
+
+    enterJsxTag(parser);
+    var peek = parser.beginPeek();
+    defer peek.end();
+    defer exitJsxTag(parser);
+
+    const opening = peek.next();
+    if (opening.span.start != parser.current_token.span.end) return false;
+    if (opening.tag == .greater_than or opening.tag == .left_brace) return true;
+    if (opening.tag != .jsx_identifier) return false;
+
+    const after_name = peek.next();
+    if (after_name.tag == .comma) return false;
+    if (after_name.tag != .jsx_identifier) return true;
+    return !std.mem.eql(u8, after_name.text(parser.source), "extends");
+}
+
 // https://facebook.github.io/jsx/#prod-JSXElement
 pub fn parseJsxExpression(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .less_than);

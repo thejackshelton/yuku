@@ -51,6 +51,9 @@ pub fn parseExpression(
     while (true) {
         const current_token = parser.current_token;
 
+        if (current_token.tag == .less_than and
+            statements.canInsertSemicolonBeforeJSX(parser)) break;
+
         // f<T>(x)
         //  ^ dispatched before the binary precedence gate so it can
         //    act as a call-level postfix (generic call/instantiation)
@@ -310,10 +313,8 @@ fn parseParenthesizedOrArrowFunction(
 
     const cover = try parenthesized.parseCover(parser) orelse return null;
 
-    // every ts arrow went through the tristate above. only js-shaped
-    // arrows (`(a, b) => body`) reach here, so no `:` return-type parse
-    // is needed. a stray `:` after the cover belongs to the outer
-    // context (ternary else, case label, ...).
+    // extension-owned ts bindings can reach this path after the cover
+    // consumed their type syntax. other ts arrows used the tristate above
     const is_arrow = parser.current_token.tag == .arrow and
         !parser.current_token.hasLineTerminatorBefore() and
         precedence <= Precedence.Assignment;
@@ -422,9 +423,8 @@ fn parseAsyncArrowFunctionOrCall(
 
     const cover = try parenthesized.parseCover(parser) orelse return null;
 
-    // js-shaped async arrow or a plain `async(args)` call. every ts
-    // variant was handled by the tristate above, so no `:` return-type
-    // parse is needed here.
+    // extension-owned ts bindings reach this path after the cover consumed
+    // their type syntax alongside js-shaped arrows and plain calls
     const is_arrow = parser.current_token.tag == .arrow and
         !parser.current_token.hasLineTerminatorBefore() and
         precedence <= Precedence.Assignment;

@@ -44,10 +44,47 @@ fn Node(comptime R: type) type {
 }
 
 pub fn binding_pattern(comptime R: type, parser: anytype) R {
-    return decline(R, parser, .binding_pattern);
+    hit(.binding_pattern);
+    if (parser.current_token.tag != .bitwise_and) return null;
+
+    const start = parser.current_token.span.start;
+    try parser.advance() orelse return @as(Node(R), null);
+    std.debug.assert(parser.current_token.tag == .left_brace);
+    try parser.advance() orelse return @as(Node(R), null);
+
+    std.debug.assert(parser.current_token.tag == .identifier);
+    const name_span = parser.current_token.span;
+    const name = parser.tree.sourceSlice(name_span.start, name_span.end);
+    const key = try parser.tree.addNode(.{ .identifier_name = .{ .name = name } }, name_span);
+    const value = try parser.tree.addNode(.{ .binding_identifier = .{ .name = name } }, name_span);
+    const property = try parser.tree.addNode(
+        .{ .binding_property = .{
+            .key = key,
+            .value = value,
+            .shorthand = true,
+            .computed = false,
+        } },
+        name_span,
+    );
+    try parser.advance() orelse return @as(Node(R), null);
+
+    std.debug.assert(parser.current_token.tag == .right_brace);
+    const end = parser.current_token.span.end;
+    try parser.advance() orelse return @as(Node(R), null);
+    const properties = try parser.tree.addExtra(&.{property});
+    const pattern = try parser.tree.addNode(
+        .{ .object_pattern = .{ .properties = properties, .rest = .null } },
+        .{ .start = start, .end = end },
+    );
+    if (parser.current_token.tag == .colon) {
+        _ = try parser.parseTypeAnnotation(pattern) orelse return @as(Node(R), null);
+    }
+    return @as(Node(R), pattern);
 }
 pub fn can_start_binding(tag: anytype) ?bool {
-    return decline(?bool, tag, .can_start_binding);
+    hit(.can_start_binding);
+    if (tag == .bitwise_and) return true;
+    return null;
 }
 pub fn expression_at_code_block(comptime R: type, parser: anytype) R {
     return decline(R, parser, .expression_at_code_block);
