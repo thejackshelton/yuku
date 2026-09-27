@@ -1,4 +1,4 @@
-//! reference `parser_extension` binding: implements all 21 extension points, counts every
+//! reference `parser_extension` binding: implements all 20 extension points, counts every
 //! call, and takes a real handled path on marker syntax stock JS/TS/JSX rejects.
 
 const std = @import("std");
@@ -18,7 +18,6 @@ pub const Hook = enum {
     jsx_fragment_after_open,
     jsx_names_match,
     jsx_text_boundary,
-    jsx_text_skip,
     jsx_text_value,
     lazy_assignment_pattern,
     module_specifier,
@@ -140,18 +139,6 @@ pub fn jsx_text_boundary(source: []const u8, cursor: u32) ?bool {
     hit(.jsx_text_boundary);
     if (source[cursor] != '<') return null;
     return true;
-}
-
-/// `~~` keeps the character after it in the text run, so `~~<` is text,
-/// unless extension flag bit 0 turns the rule off.
-pub fn jsx_text_skip(lexer: anytype, run_start: u32, cursor: u32) ?u32 {
-    hit(.jsx_text_skip);
-    const source = lexer.source;
-    if (lexer.extension_flags & 1 != 0) return null;
-    std.debug.assert(run_start <= cursor);
-    std.debug.assert(cursor < source.len);
-    if (!std.mem.startsWith(u8, source[cursor..], "~~")) return null;
-    return @intCast(@min(source.len, cursor + 3));
 }
 
 /// `!!text` is re-interned without the sigil.

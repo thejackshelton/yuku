@@ -7,7 +7,7 @@ const Hook = extension.Hook;
 
 const Case = struct { source: []const u8, lang: ast.Lang = .js };
 
-/// between them these reach all 21 extension points; none of them is a parse error.
+/// between them these reach all 20 extension points; none of them is a parse error.
 const corpus = [_]Case{
     .{ .source =
     \\let x = 1;
@@ -21,7 +21,6 @@ const corpus = [_]Case{
     .{ .source = "import x from bare;" },
     .{ .source = "const el = <div a={1}>hi{ok}</div>;\nconst frag = <><b>bold</b></>;", .lang = .jsx },
     .{ .source = "const el = <p>!!shout</p>;", .lang = .jsx },
-    .{ .source = "const el = <p>a~~<b</p>;", .lang = .jsx },
     .{ .source = "const el = <div>x</_>;\nconst d = <Deprecated />;", .lang = .jsx },
 };
 
@@ -78,17 +77,6 @@ test "handled positions carry the extension's own values" {
     var shout = try parseCase(corpus[5]);
     defer shout.deinit();
     try std.testing.expectEqualStrings("shout", shout.string(shout.data(try firstNode(&shout, .jsx_text)).jsx_text.value));
-
-    // `~~<` stays in the text run instead of opening a tag.
-    var skipped = try parseCase(corpus[6]);
-    defer skipped.deinit();
-    try std.testing.expectEqual(@as(usize, 1), countNodes(&skipped, .jsx_text));
-    try std.testing.expectEqualStrings("a~~<b", skipped.string(skipped.data(try firstNode(&skipped, .jsx_text)).jsx_text.value));
-
-    // the extension reads its own flags off the lexer: bit 0 turns `~~` off
-    var unskipped = try parser.parse(std.testing.allocator, corpus[6].source, .{ .lang = .jsx, .extension_flags = 1 });
-    defer unskipped.deinit();
-    try std.testing.expect(unskipped.hasErrors());
 
     var bare = try parseCase(corpus[3]);
     defer bare.deinit();
