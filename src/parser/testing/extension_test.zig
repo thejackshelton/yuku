@@ -7,7 +7,7 @@ const Hook = extension.Hook;
 
 const Case = struct { source: []const u8, lang: ast.Lang = .js };
 
-/// between them these reach all 20 extension points; none of them is a parse error.
+/// between them these reach all 21 extension points; none of them is a parse error.
 const corpus = [_]Case{
     .{ .source =
     \\let x = 1;
@@ -21,6 +21,7 @@ const corpus = [_]Case{
     .{ .source = "import x from bare;" },
     .{ .source = "const el = <div a={1}>hi{ok}</div>;\nconst frag = <><b>bold</b></>;", .lang = .jsx },
     .{ .source = "const el = <p>!!shout</p>;", .lang = .jsx },
+    .{ .source = "const el = <p>a##b</p>;", .lang = .jsx },
     .{ .source = "const el = <div>x</_>;\nconst d = <Deprecated />;", .lang = .jsx },
 };
 
@@ -77,6 +78,12 @@ test "handled positions carry the extension's own values" {
     var shout = try parseCase(corpus[5]);
     defer shout.deinit();
     try std.testing.expectEqualStrings("shout", shout.string(shout.data(try firstNode(&shout, .jsx_text)).jsx_text.value));
+
+    // `##` splits the text around a `{}` child
+    var split = try parseCase(corpus[6]);
+    defer split.deinit();
+    try std.testing.expectEqual(@as(usize, 2), countNodes(&split, .jsx_text));
+    try std.testing.expectEqual(@as(usize, 1), countNodes(&split, .jsx_expression_container));
 
     var bare = try parseCase(corpus[3]);
     defer bare.deinit();

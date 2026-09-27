@@ -1,4 +1,4 @@
-//! reference `parser_extension` binding: implements all 20 extension points, counts every
+//! reference `parser_extension` binding: implements all 21 extension points, counts every
 //! call, and takes a real handled path on marker syntax stock JS/TS/JSX rejects.
 
 const std = @import("std");
@@ -18,6 +18,7 @@ pub const Hook = enum {
     jsx_fragment_after_open,
     jsx_names_match,
     jsx_text_boundary,
+    jsx_text_child,
     jsx_text_value,
     lazy_assignment_pattern,
     module_specifier,
@@ -139,6 +140,15 @@ pub fn jsx_text_boundary(source: []const u8, cursor: u32) ?bool {
     hit(.jsx_text_boundary);
     if (source[cursor] != '<') return null;
     return true;
+}
+
+/// `##` in text is an empty `{}` child of its own.
+pub fn jsx_text_child(comptime R: type, parser: anytype, span: anytype) R {
+    hit(.jsx_text_child);
+    const at = std.mem.indexOf(u8, parser.source[span.start..span.end], "##") orelse return .null;
+    const marker: @TypeOf(span) = .{ .start = span.start + @as(u32, @intCast(at)), .end = span.start + @as(u32, @intCast(at)) + 2 };
+    const empty = try parser.tree.addNode(.{ .jsx_empty_expression = .{} }, marker);
+    return parser.tree.addNode(.{ .jsx_expression_container = .{ .expression = empty } }, marker);
 }
 
 /// `!!text` is re-interned without the sigil.

@@ -351,7 +351,13 @@ fn parseJsxChildren(parser: *Parser, gt_end: u32) Error!?ast.IndexRange {
 
     while (true) {
         // scan text content until '<' or '{'
-        const text_token = parser.lexer.reScanJsxText(scan_from);
+        var text_token = parser.lexer.reScanJsxText(scan_from);
+        // a child the extension reads inside the text, such as a comment, ends it there
+        const inner: ast.NodeIndex = if (comptime @hasDecl(parser_extension, "jsx_text_child"))
+            try parser_extension.jsx_text_child(Error!ast.NodeIndex, parser, text_token.span)
+        else
+            .null;
+        if (inner != .null) text_token.span.end = parser.tree.span(inner).start;
 
         if (text_token.len() > 0) {
             var text_value = parser.tree.sourceSlice(text_token.span.start, text_token.span.end);
@@ -371,6 +377,11 @@ fn parseJsxChildren(parser: *Parser, gt_end: u32) Error!?ast.IndexRange {
             }, text_token.span);
 
             try parser.scratch_b.append(parser.allocator(), text_node);
+        }
+        if (inner != .null) {
+            try parser.scratch_b.append(parser.allocator(), inner);
+            scan_from = parser.tree.span(inner).end;
+            continue;
         }
 
         // advance past jsx_text to get the delimiter token ('<' or '{')
