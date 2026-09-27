@@ -67,6 +67,8 @@ pub const Lexer = struct {
     cursor: u32,
 
     source_type: ast.SourceType,
+    /// `Options.extension_flags`, opaque to the lexer; read by extension hooks.
+    extension_flags: u32 = 0,
     hashbang: ?struct { start: u32, len: u16 } = null,
 
     pub fn init(
@@ -453,6 +455,17 @@ pub const Lexer = struct {
         const start = self.cursor;
 
         while (self.cursor < self.source.len) {
+            // a span the extension keeps inside the text run whatever it holds, such as a
+            // comment: its '<', '{', '>' and '}' do not end the run.
+            if (comptime @hasDecl(parser_extension, "jsx_text_skip")) {
+                if (parser_extension.jsx_text_skip(self, start, self.cursor)) |resume_at| {
+                    std.debug.assert(resume_at > self.cursor);
+                    std.debug.assert(resume_at <= self.source.len);
+                    self.cursor = resume_at;
+                    continue;
+                }
+            }
+
             const c = self.source[self.cursor];
             if (comptime @hasDecl(parser_extension, "jsx_text_boundary"))
                 if (parser_extension.jsx_text_boundary(self.source, self.cursor)) |stop| if (stop) break;

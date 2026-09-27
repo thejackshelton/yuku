@@ -30,6 +30,7 @@ pub const extension_points = [_][]const u8{
     "jsx_fragment_after_open", // fn(comptime R: type, parser, opening) R
     "jsx_names_match", // fn(parser, a, b) ?bool; does a closing tag match its opening tag
     "jsx_text_boundary", // fn(source: []const u8, cursor: u32) ?bool; true ends the text run
+    "jsx_text_skip", // fn(lexer: *const Lexer, run_start: u32, cursor: u32) ?u32; text run resumes there, past cursor
     "jsx_text_value", // fn(comptime R: type, parser, span) R, R = Error!?ast.String; interned value
     "lazy_assignment_pattern", // fn(comptime R: type, parser) R; head of parsePrefix
     "module_specifier", // fn(comptime R: type, parser) R; a non-string module specifier
@@ -95,6 +96,9 @@ pub const Options = struct {
     /// Whether and how comments are collected. Defaults to `.flat`: comments
     /// land in the flat `tree.comments` list with no per-node attachment.
     comments: CommentMode = .flat,
+    /// Opaque bits for the parser extension, carried on `Lexer.extension_flags`
+    /// for the hooks that only see the lexer. The parser never reads them.
+    extension_flags: u32 = 0,
 };
 
 pub const Context = packed struct {
@@ -149,6 +153,7 @@ pub const Parser = struct {
     lang: ast.Lang,
     preserve_parens: bool,
     comment_mode: CommentMode,
+    extension_flags: u32 = 0,
     lexer: lexer.Lexer,
     diagnostics: std.ArrayList(ast.Diagnostic) = .empty,
 
@@ -183,6 +188,7 @@ pub const Parser = struct {
             .lang = options.lang,
             .preserve_parens = options.preserve_parens,
             .comment_mode = options.comments,
+            .extension_flags = options.extension_flags,
             .lexer = undefined,
             .current_token = Token.eof(0),
         };
@@ -206,6 +212,7 @@ pub const Parser = struct {
             self.source_type,
             self.comment_mode.collects(),
         );
+        self.lexer.extension_flags = self.extension_flags;
 
         // ScriptBody: StatementList[~Yield, ~Await, ~Return]
         // ModuleItemList: ModuleItem[~Yield, +Await, ~Return]
