@@ -47,6 +47,9 @@ pub fn parseStatement(parser: *Parser, opts: ParseStatementOpts) Error!?ast.Node
         return parseExpressionOrLabeledStatementOrDirective(parser);
     }
 
+    if (comptime @hasDecl(parser_extension, "jsx_statement")) if (parser.current_token.tag == .less_than)
+        if (try parser_extension.jsx_statement(Error!??ast.NodeIndex, parser)) |node| return node;
+
     return switch (parser.current_token.tag) {
         .at => parseDecoratedStatement(parser),
         .await => parseAwaitUsingOrExpression(parser),

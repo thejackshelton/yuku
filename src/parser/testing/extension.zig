@@ -1,4 +1,4 @@
-//! reference `parser_extension` binding: implements all 22 extension points, counts every
+//! reference `parser_extension` binding: implements all 23 extension points, counts every
 //! call, and takes a real handled path on marker syntax stock JS/TS/JSX rejects.
 
 const std = @import("std");
@@ -18,6 +18,7 @@ pub const Hook = enum {
     jsx_element_name,
     jsx_fragment_after_open,
     jsx_names_match,
+    jsx_statement,
     jsx_text_boundary,
     jsx_text_child,
     jsx_text_value,
@@ -171,6 +172,19 @@ pub fn jsx_names_match(parser: anytype, a: anytype, b: anytype) ?bool {
     const name = parser.tree.span(b);
     if (!std.mem.eql(u8, parser.source[name.start..name.end], "_")) return null;
     return true;
+}
+
+/// `<~>` in statement position is an empty statement of its own; any other `<` is declined.
+pub fn jsx_statement(comptime R: type, parser: anytype) R {
+    hit(.jsx_statement);
+    const start = parser.current_token.span.start;
+    if (!std.mem.startsWith(u8, parser.source[start..], "<~>")) return null;
+    try parser.advance() orelse return @as(Node(R), null); // '<'
+    try parser.advance() orelse return @as(Node(R), null); // '~'
+    std.debug.assert(parser.current_token.tag == .greater_than);
+    const end = parser.current_token.span.end;
+    try parser.advance() orelse return @as(Node(R), null); // '>'
+    return @as(Node(R), try parser.tree.addNode(.{ .empty_statement = .{} }, .{ .start = start, .end = end }));
 }
 
 pub fn jsx_text_boundary(source: []const u8, cursor: u32) ?bool {

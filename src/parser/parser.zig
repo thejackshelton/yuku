@@ -30,6 +30,7 @@ pub const extension_points = [_][]const u8{
     "jsx_element_name", // fn(comptime R: type, parser) R; opening and closing tags alike
     "jsx_fragment_after_open", // fn(comptime R: type, parser, opening) R
     "jsx_names_match", // fn(parser, a, b) ?bool; does a closing tag match its opening tag
+    "jsx_statement", // fn(comptime R: type, parser) R; `<` in statement position
     "jsx_text_boundary", // fn(source: []const u8, cursor: u32) ?bool; true ends the text run
     "jsx_text_child", // fn(comptime R: type, parser, span) R, R = Error!ast.NodeIndex; a child inside the text, such as a comment, that ends the run
     "jsx_text_value", // fn(comptime R: type, parser, span) R, R = Error!?ast.String; interned value

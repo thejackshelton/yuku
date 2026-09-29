@@ -7,7 +7,7 @@ const Hook = extension.Hook;
 
 const Case = struct { source: []const u8, lang: ast.Lang = .js };
 
-/// between them these reach all 22 extension points; none of them is a parse error.
+/// between them these reach all 23 extension points; none of them is a parse error.
 const corpus = [_]Case{
     .{ .source =
     \\let x = 1;
@@ -25,6 +25,7 @@ const corpus = [_]Case{
     .{ .source = "const el = <div>x</_>;\nconst d = <Deprecated />;", .lang = .jsx },
     .{ .source = "const el = <a {href} {...rest} />;", .lang = .jsx },
     .{ .source = "class View {\n  render() %{}\n  static get size(): number %{}\n  #hidden() {}\n  declared(): void;\n}", .lang = .ts },
+    .{ .source = "<~>\nlet y = <b />;\n<~>", .lang = .jsx },
 };
 
 fn parseCase(case: Case) !ast.Tree {
@@ -103,6 +104,14 @@ test "handled positions carry the extension's own values" {
     try std.testing.expectEqual(@as(usize, 3), countNodes(&class_tree, .function_body));
     const first_body = class_tree.span(try firstNode(&class_tree, .function_body));
     try std.testing.expectEqualStrings("%{}", class_tree.source[first_body.start..first_body.end]);
+
+    // `<~>` opening a statement is the extension's; the `<b />` inside the declaration is the parser's
+    var marked = try parseCase(corpus[10]);
+    defer marked.deinit();
+    try std.testing.expectEqual(@as(usize, 2), countNodes(&marked, .empty_statement));
+    try std.testing.expectEqual(@as(usize, 1), countNodes(&marked, .jsx_element));
+    const marker = marked.span(try firstNode(&marked, .empty_statement));
+    try std.testing.expectEqualStrings("<~>", marked.source[marker.start..marker.end]);
 
     var bare = try parseCase(corpus[3]);
     defer bare.deinit();
