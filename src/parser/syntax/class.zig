@@ -612,7 +612,7 @@ fn parseMethodDefinition(
     var function_type: ast.FunctionType = .function_expression;
     var end: u32 = return_type_end;
 
-    if (parser.current_token.tag == .left_brace) {
+    if (functions.bodyStarts(parser, parser.current_token.tag == .left_brace)) {
         body = try functions.parseFunctionBody(parser) orelse return null;
         end = parser.tree.span(body).end;
 

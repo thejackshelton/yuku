@@ -130,13 +130,8 @@ pub fn parseFunction(
     }
 
     // ts ambient declarations and overload signatures are body-less.
-    var has_body = !is_ambient_declaration and
-        (!is_ts or is_function_expression or parser.current_token.tag == .left_brace);
-    if (comptime @hasDecl(parser_extension, "function_body_starts")) {
-        if (parser_extension.function_body_starts(parser)) |value| {
-            has_body = value;
-        }
-    }
+    const has_body = bodyStarts(parser, !is_ambient_declaration and
+        (!is_ts or is_function_expression or parser.current_token.tag == .left_brace));
     const body: ast.NodeIndex = if (has_body)
         try parseFunctionBody(parser) orelse .null
     else
@@ -190,6 +185,16 @@ pub fn parseFunction(
         .start = start,
         .end = end,
     });
+}
+
+/// whether a function or a class method carries a body at the current token, given
+/// the parser's own answer. the extension can override it for a body `parseFunctionBody`
+/// hands to it.
+pub fn bodyStarts(parser: *Parser, default: bool) bool {
+    if (comptime @hasDecl(parser_extension, "function_body_starts")) {
+        if (parser_extension.function_body_starts(parser)) |value| return value;
+    }
+    return default;
 }
 
 pub fn parseFunctionBody(parser: *Parser) Error!?ast.NodeIndex {

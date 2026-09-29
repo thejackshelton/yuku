@@ -24,6 +24,7 @@ const corpus = [_]Case{
     .{ .source = "const el = <p>a##b</p>;", .lang = .jsx },
     .{ .source = "const el = <div>x</_>;\nconst d = <Deprecated />;", .lang = .jsx },
     .{ .source = "const el = <a {href} {...rest} />;", .lang = .jsx },
+    .{ .source = "class View {\n  render() %{}\n  static get size(): number %{}\n  #hidden() {}\n  declared(): void;\n}", .lang = .ts },
 };
 
 fn parseCase(case: Case) !ast.Tree {
@@ -94,6 +95,14 @@ test "handled positions carry the extension's own values" {
     const container = shorthand.data(attribute.value).jsx_expression_container;
     try std.testing.expectEqual(.identifier_reference, std.meta.activeTag(shorthand.data(container.expression)));
     try std.testing.expectEqual(@as(usize, 1), countNodes(&shorthand, .jsx_spread_attribute));
+
+    // a class method's `%{}` is the extension's body; `{}` and a bodyless signature are the parser's
+    var class_tree = try parseCase(corpus[9]);
+    defer class_tree.deinit();
+    try std.testing.expectEqual(@as(usize, 4), countNodes(&class_tree, .method_definition));
+    try std.testing.expectEqual(@as(usize, 3), countNodes(&class_tree, .function_body));
+    const first_body = class_tree.span(try firstNode(&class_tree, .function_body));
+    try std.testing.expectEqualStrings("%{}", class_tree.source[first_body.start..first_body.end]);
 
     var bare = try parseCase(corpus[3]);
     defer bare.deinit();

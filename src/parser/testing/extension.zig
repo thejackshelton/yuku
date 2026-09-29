@@ -106,11 +106,25 @@ pub fn for_of_tail(comptime R: type, parser: anytype, args: anytype) R {
     return null;
 }
 
+/// `%{}` is an empty body, where `function_body_starts` lets one start.
 pub fn function_body(comptime R: type, parser: anytype) R {
-    return decline(R, parser, .function_body);
+    hit(.function_body);
+    if (parser.current_token.tag != .percent) return null;
+
+    const start = parser.current_token.span.start;
+    try parser.advance() orelse return @as(Node(R), null); // '%'
+    std.debug.assert(parser.current_token.tag == .left_brace);
+    try parser.advance() orelse return @as(Node(R), null);
+    std.debug.assert(parser.current_token.tag == .right_brace);
+    const end = parser.current_token.span.end;
+    try parser.advance() orelse return @as(Node(R), null);
+    const body = try parser.tree.addExtra(&.{});
+    return @as(Node(R), try parser.tree.addNode(.{ .function_body = .{ .body = body } }, .{ .start = start, .end = end }));
 }
 pub fn function_body_starts(parser: anytype) ?bool {
-    return decline(?bool, parser, .function_body_starts);
+    hit(.function_body_starts);
+    if (parser.current_token.tag == .percent) return true;
+    return null;
 }
 /// `{name}` in an opening tag is the attribute `name={name}`; `{...x}` is declined.
 pub fn jsx_attribute(comptime R: type, parser: anytype) R {
