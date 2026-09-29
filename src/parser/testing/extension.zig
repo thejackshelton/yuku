@@ -1,4 +1,4 @@
-//! reference `parser_extension` binding: implements all 21 extension points, counts every
+//! reference `parser_extension` binding: implements all 22 extension points, counts every
 //! call, and takes a real handled path on marker syntax stock JS/TS/JSX rejects.
 
 const std = @import("std");
@@ -11,6 +11,7 @@ pub const Hook = enum {
     for_of_tail,
     function_body,
     function_body_starts,
+    jsx_attribute,
     jsx_child_at_code_block,
     jsx_child_at_control_flow,
     jsx_element_after_open,
@@ -110,6 +111,28 @@ pub fn function_body(comptime R: type, parser: anytype) R {
 }
 pub fn function_body_starts(parser: anytype) ?bool {
     return decline(?bool, parser, .function_body_starts);
+}
+/// `{name}` in an opening tag is the attribute `name={name}`; `{...x}` is declined.
+pub fn jsx_attribute(comptime R: type, parser: anytype) R {
+    hit(.jsx_attribute);
+    const start = parser.current_token.span.start;
+    if (std.mem.startsWith(u8, parser.source[start + 1 ..], "...")) return null;
+
+    parser.setLexerMode(.normal);
+    try parser.advance() orelse return @as(Node(R), null); // '{'
+    std.debug.assert(parser.current_token.tag == .identifier);
+    const name_token = parser.current_token;
+    const name = try parser.identifierName(name_token);
+    const key = try parser.tree.addNode(.{ .jsx_identifier = .{ .name = name } }, name_token.span);
+    const reference = try parser.tree.addNode(.{ .identifier_reference = .{ .name = name } }, name_token.span);
+    try parser.advance() orelse return @as(Node(R), null);
+
+    std.debug.assert(parser.current_token.tag == .right_brace);
+    const span: @TypeOf(name_token.span) = .{ .start = start, .end = parser.current_token.span.end };
+    parser.setLexerMode(.jsx_tag);
+    try parser.advance() orelse return @as(Node(R), null); // '}'
+    const value = try parser.tree.addNode(.{ .jsx_expression_container = .{ .expression = reference } }, span);
+    return @as(Node(R), try parser.tree.addNode(.{ .jsx_attribute = .{ .name = key, .value = value } }, span));
 }
 pub fn jsx_child_at_code_block(comptime R: type, parser: anytype) R {
     return decline(R, parser, .jsx_child_at_code_block);

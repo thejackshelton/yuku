@@ -23,6 +23,7 @@ pub const extension_points = [_][]const u8{
     "for_of_tail", // fn(comptime R: type, parser, args: struct{start,left,right,is_for_await}) R; may consume its tail then decline
     "function_body", // fn(comptime R: type, parser) R; head of parseFunctionBody
     "function_body_starts", // fn(parser) ?bool; whether a `function` carries a body
+    "jsx_attribute", // fn(comptime R: type, parser) R; an attribute that opens with `{`, before the spread
     "jsx_child_at_code_block", // fn(comptime R: type, parser) R; past `{` in a JSX child
     "jsx_child_at_control_flow", // as above, consulted second
     "jsx_element_after_open", // fn(comptime R: type, parser, opening, context) R

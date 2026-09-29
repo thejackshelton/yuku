@@ -497,8 +497,11 @@ fn parseJsxAttributes(parser: *Parser) Error!?ast.IndexRange {
 
 // https://facebook.github.io/jsx/#prod-JSXAttribute
 fn parseJsxAttribute(parser: *Parser) Error!?ast.NodeIndex {
-    // spread attribute: {...expr}
     if (parser.current_token.tag == .left_brace) {
+        // an attribute the extension reads from a `{`, such as a shorthand `{name}`
+        if (comptime @hasDecl(parser_extension, "jsx_attribute"))
+            if (try parser_extension.jsx_attribute(Error!??ast.NodeIndex, parser)) |node| return node;
+        // spread attribute: {...expr}
         return parseJsxSpreadAttribute(parser);
     }
 

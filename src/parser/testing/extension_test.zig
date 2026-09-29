@@ -7,7 +7,7 @@ const Hook = extension.Hook;
 
 const Case = struct { source: []const u8, lang: ast.Lang = .js };
 
-/// between them these reach all 21 extension points; none of them is a parse error.
+/// between them these reach all 22 extension points; none of them is a parse error.
 const corpus = [_]Case{
     .{ .source =
     \\let x = 1;
@@ -23,6 +23,7 @@ const corpus = [_]Case{
     .{ .source = "const el = <p>!!shout</p>;", .lang = .jsx },
     .{ .source = "const el = <p>a##b</p>;", .lang = .jsx },
     .{ .source = "const el = <div>x</_>;\nconst d = <Deprecated />;", .lang = .jsx },
+    .{ .source = "const el = <a {href} {...rest} />;", .lang = .jsx },
 };
 
 fn parseCase(case: Case) !ast.Tree {
@@ -84,6 +85,15 @@ test "handled positions carry the extension's own values" {
     defer split.deinit();
     try std.testing.expectEqual(@as(usize, 2), countNodes(&split, .jsx_text));
     try std.testing.expectEqual(@as(usize, 1), countNodes(&split, .jsx_expression_container));
+
+    // `{href}` is `href={href}`; the spread beside it is still the parser's own
+    var shorthand = try parseCase(corpus[8]);
+    defer shorthand.deinit();
+    const attribute = shorthand.data(try firstNode(&shorthand, .jsx_attribute)).jsx_attribute;
+    try std.testing.expectEqualStrings("href", shorthand.string(shorthand.data(attribute.name).jsx_identifier.name));
+    const container = shorthand.data(attribute.value).jsx_expression_container;
+    try std.testing.expectEqual(.identifier_reference, std.meta.activeTag(shorthand.data(container.expression)));
+    try std.testing.expectEqual(@as(usize, 1), countNodes(&shorthand, .jsx_spread_attribute));
 
     var bare = try parseCase(corpus[3]);
     defer bare.deinit();
