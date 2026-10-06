@@ -51,7 +51,7 @@ pub const Context = packed struct {
     await: bool = false,
     /// `[Return]`
     @"return": bool = false,
-    /// Body of `if`, `while`, `for`, `with`, or a labelled statement, where lexical
+    /// Body of `if`, `do`, `while`, `for`, `with`, or a labelled statement, where lexical
     /// declarations need a block.
     single_statement: bool = false,
     /// Inside a directive prologue.
@@ -59,7 +59,8 @@ pub const Context = packed struct {
 };
 
 pub const TsContext = packed struct {
-    /// Inside a `declare`-prefixed declaration, where nested declarations inherit ambient rules.
+    /// Inside a `declare`-prefixed declaration or a `.d.ts` file, where nested declarations
+    /// inherit ambient rules.
     ambient: bool = false,
     /// A trailing `?` after a type does not start a new conditional.
     disallow_conditional_types: bool = false,

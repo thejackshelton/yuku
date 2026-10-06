@@ -95,7 +95,7 @@ pub fn isStartOfMappedType(parser: *Parser) bool {
 }
 
 // { [K in T]: V }   { readonly [K in T]?: V }   { -readonly [K in T as U]-?: V }
-// ^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// ^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 pub fn parseMappedType(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .left_brace);
 
@@ -356,9 +356,7 @@ fn parseIndexSignatureParameter(parser: *Parser) Error!?ast.NodeIndex {
         return null;
     }
 
-    const annotation = try predicate.parseTypeAnnotation(parser) orelse return null;
-    predicate.applyTypeAnnotationToPattern(parser, name, annotation);
-    return name;
+    return predicate.parsePatternTypeAnnotation(parser, name);
 }
 
 fn parsePropertyOrMethodSignature(

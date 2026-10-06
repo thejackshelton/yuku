@@ -517,7 +517,7 @@ pub const Token = extern struct {
         return self.has(.invalid_escape);
     }
 
-    /// Whether the token text contains unicode escapes.
+    /// Whether the token text contains escape sequences, or a raw carriage return in a template.
     pub inline fn isEscaped(self: Token) bool {
         return self.has(.escaped);
     }

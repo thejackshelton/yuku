@@ -7,7 +7,7 @@ pub fn isWordOp(op: []const u8) bool {
         std.mem.eql(u8, op, "delete");
 }
 
-/// True when `c` can continue an ASCII identifier or is a non-ASCII lead byte.
+/// True when `c` can continue an ASCII identifier or is a non-ASCII byte.
 pub inline fn isIdCont(c: u8) bool {
     return c == '$' or c >= 0x80 or util.UnicodeId.canContinueId(c);
 }
@@ -149,7 +149,7 @@ fn writeFixed(scratch: []u8, d: []const u8, exp: i64) ?[]const u8 {
     return scratch[0 .. 1 + f];
 }
 
-/// True when every line after the first is blank or starts with `*`.
+/// True when the value spans lines and every line after the first is blank or starts with `*`.
 pub fn isJsdocBody(value: []const u8) bool {
     var it = std.mem.splitScalar(u8, value, '\n');
     _ = it.next();

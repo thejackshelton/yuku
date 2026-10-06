@@ -271,7 +271,7 @@ pub inline fn parsePrimaryExpression(parser: *Parser, precedence: u8) Error!?ast
     };
 }
 
-// used by `new`, which never takes an arrow
+// used by `new` and parseLeftHandSideExpression, neither of which takes an arrow
 fn parseParenthesizedExpression(parser: *Parser) Error!?ast.NodeIndex {
     const cover = try parenthesized.parseCover(parser) orelse return null;
 

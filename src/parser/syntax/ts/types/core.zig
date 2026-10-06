@@ -857,7 +857,7 @@ fn parseTypeQuery(parser: *Parser) Error!?ast.NodeIndex {
 }
 
 // import("module")    import("module").Foo.Bar<T>    import("m", { with: ... })
-// ^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^^^^^^^^
+// ^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^^^^^^^^^
 fn parseImportType(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .import);
 

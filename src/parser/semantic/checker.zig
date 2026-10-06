@@ -208,7 +208,7 @@ pub const Checker = struct {
         return .proceed;
     }
 
-    /// https://tc39.es/ecma262/#sec-string-literals-static-semantics-early-errors
+    /// https://tc39.es/ecma262/#sec-string-literals-early-errors
     pub fn enter_string_literal(
         self: *Self,
         _: ast.StringLiteral,
@@ -602,7 +602,8 @@ pub const Checker = struct {
             );
         }
 
-        // https://tc39.es/ecma262/#sec-static-semantics-early-errors
+        // https://tc39.es/ecma262/#sec-scripts-static-semantics-early-errors
+        // https://tc39.es/ecma262/#sec-module-semantics-static-semantics-early-errors
         if (eql(u8, name, "new") and !isNewTargetAvailable(ctx)) {
             try self.report(
                 ctx.tree.span(node_index),

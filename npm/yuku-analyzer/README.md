@@ -1,8 +1,18 @@
 # yuku-analyzer
 
-Scopes, bindings, resolved references, closures, and cross-file linking for JavaScript and TypeScript, computed natively in the same pass as the parse, part of [Yuku](https://yuku.fyi).
+Scopes, bindings, resolved references, closures, and cross-file linking for JavaScript and TypeScript, computed natively, part of [Yuku](https://yuku.fyi).
 
-It does the work of `eslint-scope` or `@typescript-eslint/scope-manager` and a cross-file resolver, up to 15× faster per file.
+Getting the same answers otherwise takes a stack of tools, each parsing every file again into its own tree:
+
+- `@typescript-eslint/typescript-estree` for the AST
+- `@typescript-eslint/scope-manager` or `eslint-scope` for scopes, bindings, and references
+- TypeScript's API for names resolved across files, merged declarations, and exports
+- a module resolver, such as `enhanced-resolve`, to find the file behind each import
+- the glue that maps one tool's nodes onto another's
+
+`yuku-analyzer` is all of it in one package, from one parse. On [real codebases](https://github.com/yuku-toolchain/ecmascript-analyzer-benchmark-js) it is 5–11× faster than typescript-eslint and 4–7× faster than TypeScript's API, using up to 5× less memory. Each of those compares it with a single tool, so against the whole stack the gap only widens.
+
+It is as accurate as it is fast. [Read how it is tested →](https://yuku.fyi/testing/#semantic-analysis)
 
 - [Install](#install)
 - [Usage](#usage)
@@ -21,7 +31,7 @@ It does the work of `eslint-scope` or `@typescript-eslint/scope-manager` and a c
 npm install yuku-analyzer
 ```
 
-It runs on a native binary for each platform, and on [`@yuku-engine/wasm`](https://www.npmjs.com/package/@yuku-engine/wasm) in browsers, edge runtimes, and on platforms without one.
+It runs on Yuku's native core, installed for your platform. In browsers and edge runtimes, load the WebAssembly core from [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm) and pass it in, with `new Analyzer({ core })` or `analyze(source, { core })`.
 
 ## Usage
 
@@ -64,7 +74,7 @@ project.link();                         // links now, cross-file queries link on
 
 The options are `lang` and `sourceType`, inferred from the path, and `preserveParens`, `attachComments`, and `tokens`, as in [`yuku-parser`](https://www.npmjs.com/package/yuku-parser#options). `analyze(source, options)` is a project of one file, with `path` among its options.
 
-The default resolver matches relative specifiers to files in the project, probing extensions and index files. A package or an asset such as `./app.css` is external, and a relative specifier with no match is reported.
+The default resolver matches relative specifiers to files in the project, probing extensions and index files as TypeScript does, so `./a.js` finds `a.ts`. A package or an asset such as `./app.css` is external, and a relative specifier with no match is reported.
 
 A diagnostic has the shape of [`yuku-parser`'s](https://www.npmjs.com/package/yuku-parser#diagnostics), with the `path` of its module.
 
@@ -95,6 +105,7 @@ module.bindingOf(node);      // the binding a node declares or refers to
 module.referenceOf(node);
 module.scopeOf(node);
 module.parentOf(node);
+module.ancestors(node);      // the node, then each parent up to the root
 module.nodeAt(offset);       // the innermost node at a UTF-16 offset
 module.lookup("x", { from: scope, space: "value" }); // resolves a name as code there would
 module.capturesOf(fn);       // [{ binding, references, isWritten }], the outer bindings it uses
@@ -171,6 +182,8 @@ function f() {
 }
 ```
 
+The blocks of one namespace or enum see each other's exports and members, as one declaration.
+
 ## Imports and exports
 
 ```js
@@ -233,11 +246,11 @@ module.walk({
 | `NamespaceModule`        | a namespace of any kind                      |
 | `ValueImport`            | `import x`, `import { x }`                   |
 | `TypeImport`             | `import type`, `import { type x }`           |
-| `Const`                  | `const`, `using`                             |
+| `Const`                  | `const`, `using`, `await using`              |
 | `Ambient`                | `declare`                                    |
 | `Parameter`              | a parameter                                  |
 | `CatchVariable`          | `catch (e)`                                  |
-| `Exported`               | `export <declaration>`                       |
+| `Exported`               | `export`, or implicitly in ambient code      |
 | `Default`                | `export default <declaration>`               |
 | `EnumMember`             | an enum member                               |
 | `Variable`               | any variable                                 |

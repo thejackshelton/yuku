@@ -1,5 +1,6 @@
 import type {
   Comment,
+  Core,
   Diagnostic,
   FileOptions,
   Identifier,
@@ -24,13 +25,19 @@ interface ParseOptions {
 
 interface SetFileOptions extends Omit<FileOptions, "path">, ParseOptions {}
 
-interface AnalyzeOptions extends FileOptions, ParseOptions {}
+interface AnalyzeOptions extends FileOptions, ParseOptions, Pick<AnalyzerOptions, "core"> {}
 
 interface AnalyzerOptions {
   /**
+   * The core that analyzes, from `load` in `yuku-core` or `@yuku-core/wasm`.
+   * @default the native core
+   */
+  core?: Core;
+  /**
    * Maps an import specifier to the path of a file in the project. Return `false` for a module
    * outside the project, such as a package, and `null` when it cannot be resolved, which is
-   * reported as a warning. Defaults to relative paths with extension and index probing.
+   * reported as a warning. Defaults to relative paths, probing extensions and index files as
+   * TypeScript does.
    */
   resolve?: (specifier: string, importer: string) => string | false | null;
 }
@@ -56,13 +63,13 @@ declare const BindingFlags: {
   readonly ValueImport: number;
   /** `import type` or `import { type x }`. */
   readonly TypeImport: number;
-  /** `const` or `using`. */
+  /** `const`, `using`, or `await using`. */
   readonly Const: number;
   /** `declare`. */
   readonly Ambient: number;
   readonly Parameter: number;
   readonly CatchVariable: number;
-  /** Declared by `export <declaration>`. */
+  /** Declared by `export`, or implicitly in ambient code with no export statement. */
   readonly Exported: number;
   /** Declared by `export default`. */
   readonly Default: number;
@@ -174,6 +181,8 @@ interface Module {
   /** The innermost scope around a node, the root scope for a node added later. */
   scopeOf(node: Node): Scope;
   parentOf(node: Node): Node | null;
+  /** The node, then each parent up to the root. */
+  ancestors(node: Node): IterableIterator<Node>;
   /** The innermost node containing a UTF-16 offset. */
   nodeAt(offset: number): Node | null;
   /** Resolves a name as code at `from` would. */
@@ -189,7 +198,7 @@ interface Module {
   walkAsync(visitors: AsyncSemanticVisitors, root?: Node): Promise<void>;
   /** Every node of the given types, in source order. */
   findAll<K extends NodeType>(type: K): NodeOfType<K>[];
-  findAll<K extends NodeType>(types: Iterable<K>): NodeOfType<K>[];
+  findAll<K extends NodeType>(types: readonly K[]): NodeOfType<K>[];
 }
 
 interface Scope {
@@ -286,7 +295,7 @@ interface Export {
   /** The name a `"reExport"` takes from its module. */
   readonly fromName: string | null;
   readonly typeOnly: boolean;
-  /** The specifier, the declaration, or the statement. */
+  /** The specifier, the declared name, or the statement. */
   readonly node: Node;
   /** The module it re-exports from, null outside the project. Links. */
   readonly resolvedModule: Module | null;

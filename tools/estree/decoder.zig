@@ -368,35 +368,42 @@ fn writeDecodeOpen(w: *Writer) !void {
         \\    }}
         \\    return r;
         \\  }}
-        \\  const pm = _firstNa < _srcLen ? buildPosMap(_src, _srcLen, _firstNa) : null;
-        \\  const _p = v => v <= _firstNa ? v : pm[v - _firstNa];
+        \\  let pm = null;
+        \\  function _posMap() {{
+        \\    if (pm === null && _firstNa < _srcLen) pm = buildPosMap(_src, _srcLen, _firstNa);
+        \\    return pm;
+        \\  }}
+        \\  const _p = v => v <= _firstNa ? v : _posMap()[v - _firstNa];
         \\  const str = (s, e) => {{
         \\    if (s === e) return "";
         \\    if (s >= _srcLen) return _poolDecode(s, e);
         \\    if (e <= _firstNa) return _src.slice(s, e);
-        \\    return _src.slice(s < _firstNa ? s : pm[s - _firstNa], pm[e - _firstNa]);
+        \\    const m = _posMap();
+        \\    return _src.slice(s < _firstNa ? s : m[s - _firstNa], m[e - _firstNa]);
         \\  }};
-        \\  function nodeArr(s, len) {{
+        \\  function nodeArr(s, len, depth) {{
         \\    const r = new Array(len);
         \\    const base = _extraBase + s;
-        \\    for (let j = 0; j < len; j++) r[j] = node(_u32[base + j]);
+        \\    for (let j = 0; j < len; j++) r[j] = node(_u32[base + j], depth);
         \\    return r;
         \\  }}
-        \\  function nodeArrHoles(s, len) {{
+        \\  function nodeArrHoles(s, len, depth) {{
         \\    const r = new Array(len);
         \\    for (let j = 0, base = _extraBase + s; j < len; j++) {{
         \\      const x = _u32[base + j];
-        \\      r[j] = x !== NULL ? node(x) : null;
+        \\      r[j] = x !== NULL ? node(x, depth) : null;
         \\    }}
         \\    return r;
         \\  }}
-        \\  function fnParams(idx) {{
+        \\  function fnParams(idx, depth) {{
         \\    const pb = idx * {[stride]d} + {[hdr_u32]d};
         \\    const len = _u32[pb + {[items_len]d}];
         \\    const iStart = _u32[pb + {[items]d}], rest = _u32[pb + {[rest]d}];
         \\    const p = new Array(rest !== NULL ? len + 1 : len);
-        \\    for (let j = 0, base = _extraBase + iStart; j < len; j++) p[j] = node(_u32[base + j]);
-        \\    if (rest !== NULL) p[len] = node(rest);
+        \\    for (let j = 0, base = _extraBase + iStart; j < len; j++) {{
+        \\      p[j] = node(_u32[base + j], depth);
+        \\    }}
+        \\    if (rest !== NULL) p[len] = node(rest, depth);
         \\    return p;
         \\  }}
         \\
@@ -454,8 +461,8 @@ fn writeNodeFunction(w: *Writer, mode: Mode) !void {
         \\    }}
         \\    return out;
         \\  }}
-        \\  function nodeWithComments(i) {{
-        \\    const r = _decode(i);
+        \\  function nodeWithComments(i, depth) {{
+        \\    const r = _decode(i, depth);
         \\    if (r && r.type !== undefined && r.comments === undefined) {{
         \\      const off = (_aoOff >> 2) + i;
         \\      const a = _u32[off], e = _u32[off + 1];
@@ -463,7 +470,8 @@ fn writeNodeFunction(w: *Writer, mode: Mode) !void {
         \\    }}
         \\    return r;
         \\  }}
-        \\  function _decode(i) {{
+        \\  function _decode(i, depth) {{
+        \\{[deep]s}
         \\    const b = i * {[stride]d} + {[hdr_u32]d};
         \\    const h0 = _u32[b];
         \\    const tag = h0 & 255;
@@ -482,29 +490,42 @@ fn writeNodeFunction(w: *Writer, mode: Mode) !void {
         .fe = flags_expr,
         .ss = rt.NODE_SPAN_START_U32,
         .se = rt.NODE_SPAN_END_U32,
+        .deep = if (mode == .parser) "    if (depth >= DEPTH_MAX) return _deep(i);" else "",
     });
-    try writeNodeCases(w);
+    try writeNodeCases(w, mode);
+    // every node follows its children, so building nodes in index order needs no recursion
     switch (mode) {
         .parser => try w.writeAll(
             \\    }
             \\  }
             \\  const node = _attached ? nodeWithComments : _decode;
+            \\  const DEPTH_MAX = 128, _n = [];
+            \\  function _deep(i) {
+            \\    while (_n.length <= i) _n.push(node(_n.length, DEPTH_MAX - 1));
+            \\    return _n[i];
+            \\  }
             \\
         ),
         .analyzer => try w.writeAll(
             \\    }
             \\  }
             \\  const _inner = _attached ? nodeWithComments : _decode;
-            \\  const _nodes = Array.from({ length: nodeCount });
-            \\  const _nodeIndexes = new WeakMap();
+            \\  const _n = [];
+            \\  let _nodeIndexes, _indexedCount = 0;
             \\  function node(i) {
-            \\    const m = _nodes[i];
-            \\    if (m !== undefined) return m;
-            \\    const r = _inner(i);
-            \\    _nodes[i] = r;
-            \\    if (r !== null && typeof r === "object" && !_nodeIndexes.has(r))
-            \\      _nodeIndexes.set(r, i);
-            \\    return r;
+            \\    if (_n.length === 0) _posMap();
+            \\    while (_n.length <= i) _n.push(_inner(_n.length));
+            \\    return _n[i];
+            \\  }
+            \\  function indexOf(n) {
+            \\    if (_nodeIndexes === undefined) _nodeIndexes = new Map();
+            \\    for (; _indexedCount < _n.length; _indexedCount++) {
+            \\      const r = _n[_indexedCount];
+            \\      if (r !== null && typeof r === "object" && !_nodeIndexes.has(r)) {
+            \\        _nodeIndexes.set(r, _indexedCount);
+            \\      }
+            \\    }
+            \\    return _nodeIndexes.get(n);
             \\  }
             \\
         ),
@@ -783,7 +804,7 @@ fn writeCaseOpen(w: *Writer, comptime tag: usize, comptime T: type, body: []cons
     if (body.len > 0 and body[0] != '\n') try w.writeAll(" ");
 }
 
-fn writeNodeCases(w: *Writer) !void {
+fn writeNodeCases(w: *Writer, mode: Mode) !void {
     @setEvalBranchQuota(100_000);
     var body_buf: [16 * 1024]u8 = undefined;
     inline for (@typeInfo(ast.NodeData).@"union".fields, 0..) |field, tag| {
@@ -795,9 +816,30 @@ fn writeNodeCases(w: *Writer) !void {
         }
         const body = body_w.buffered();
         try writeCaseOpen(w, tag, field.type, body);
-        try w.writeAll(body);
+        switch (mode) {
+            .parser => try writeChildCallsWithDepth(w, body),
+            .analyzer => try w.writeAll(body),
+        }
         try w.writeAll(" }\n");
     }
+}
+
+fn writeChildCallsWithDepth(w: *Writer, body: []const u8) !void {
+    const calls = [_][]const u8{ "node", "nodeArr", "nodeArrHoles", "fnParams" };
+    var written: usize = 0;
+    var open: usize = 0;
+    while (std.mem.indexOfScalarPos(u8, body, open, '(')) |paren| : (open = paren + 1) {
+        var name_start = paren;
+        while (name_start > 0 and isIdentChar(body[name_start - 1])) name_start -= 1;
+        for (calls) |call| {
+            if (!std.mem.eql(u8, body[name_start..paren], call)) continue;
+            const close = std.mem.indexOfScalarPos(u8, body, paren, ')').?;
+            std.debug.assert(std.mem.indexOfScalar(u8, body[paren + 1 .. close], '(') == null);
+            try w.print("{s}, depth + 1", .{body[written..close]});
+            written = close;
+        }
+    }
+    try w.writeAll(body[written..]);
 }
 
 fn writeGenericCase(
@@ -1456,7 +1498,11 @@ fn writeDecodeBody(w: *Writer, mode: Mode) !void {
         \\  let _program, _diagnostics, _comments, _tokens;
         \\  return {
         \\    get program() {
-        \\      return _program !== undefined ? _program : (_program = node(progIdx));
+        \\      if (_program === undefined) {
+        \\        _posMap();
+        \\        _program = node(progIdx, 0);
+        \\      }
+        \\      return _program;
         \\    },
         \\    get tokens() {
         \\      // the list closes with eof, which is not a token of the source
@@ -1481,7 +1527,7 @@ fn writeDecodeBody(w: *Writer, mode: Mode) !void {
     if (mode == .analyzer) {
         try w.writeAll(
             \\    nodeOf: node,
-            \\    indexOf: (n) => _nodeIndexes.get(n),
+            \\    indexOf,
             \\    parentIndex: (i) => _parents()[i],
             \\    startOf, endOf, str,
             \\    get semantic() { return _semantic(); },
@@ -1501,27 +1547,30 @@ fn writeParentBody(w: *Writer) !void {
         \\  let _parentArr;
         \\  function _parents() {{
         \\    if (_parentArr !== undefined) return _parentArr;
-        \\    const p = new Int32Array(nodeCount).fill(-1);
-        \\    (function visit(i, parent) {{
+        \\    const p = new Int32Array(nodeCount).fill(-2);
+        \\    p[progIdx] = -1;
+        \\    for (let i = progIdx; i >= 0; i--) {{
+        \\      if (p[i] === -2) {{ p[i] = -1; continue; }}
         \\      const o = _nodesOff + i * {[size]d};
         \\      const tag = _u8[o];
-        \\      if (IS_NODE[tag]) {{ p[i] = parent; parent = i; }}
+        \\      const parent = IS_NODE[tag] ? i : p[i];
+        \\      if (!IS_NODE[tag]) p[i] = -1;
         \\      const ops = CHILD_SLOTS[tag];
         \\      const b = o >> 2;
         \\      for (let q = 0; q < ops.length; q += 2) {{
         \\        const slot = ops[q + 1];
         \\        if (ops[q] === 0) {{
         \\          const c = _u32[b + slot];
-        \\          if (c !== NULL) visit(c, parent);
+        \\          if (c !== NULL) p[c] = parent;
         \\        }} else {{
         \\          const s = _u32[b + slot], len = _u32[b + slot + 1];
         \\          for (let j = 0; j < len; j++) {{
         \\            const c = _u32[_extraBase + s + j];
-        \\            if (c !== NULL) visit(c, parent);
+        \\            if (c !== NULL) p[c] = parent;
         \\          }}
         \\        }}
         \\      }}
-        \\    }})(progIdx, -1);
+        \\    }}
         \\    return (_parentArr = p);
         \\  }}
         \\
@@ -1607,6 +1656,7 @@ fn writeSemanticAccessors(w: *Writer) !void {
         \\        nodeIndex: (i) => {[n]s},
         \\        parentId: (i) => _id({[p]s}),
         \\        hoistTargetId: (i) => {[h]s},
+        \\        nextBodyId: (i) => _id({[b]s}),
         \\        start: (i) => startOf({[n]s}),
         \\        end: (i) => endOf({[n]s}),
         \\      }},
@@ -1618,6 +1668,7 @@ fn writeSemanticAccessors(w: *Writer) !void {
         .n = comptime cell("scopes", Scope, "node"),
         .p = comptime cell("scopes", Scope, "parent"),
         .h = comptime cell("scopes", Scope, "hoist_target"),
+        .b = comptime cell("scopes", Scope, "next_body"),
     });
     try w.print(
         \\      symbol: {{

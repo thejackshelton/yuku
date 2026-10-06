@@ -106,7 +106,7 @@ The syntax rewrites:
 
 ## Comments
 
-Comments print from the nodes they are attached to, so parse with [`attachComments: true`](https://www.npmjs.com/package/yuku-parser#attaching-comments-to-nodes) to keep them. Because they live on nodes, they move with their node through transforms.
+Comments print from the nodes they are attached to, so parse with [`attachComments: true`](https://www.npmjs.com/package/yuku-parser#comments) to keep them. Because they live on nodes, they move with their node through transforms.
 
 | Value                | Behavior                                                                            |
 | -------------------- | ----------------------------------------------------------------------------------- |

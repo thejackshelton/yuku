@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Analyzer } from "yuku-analyzer";
+import { load } from "@yuku-core/wasm";
+import { Analyzer, analyze } from "yuku-analyzer";
 import { summary } from "./utils/summarize";
 
 describe("write detection through wrappers", () => {
@@ -48,9 +49,7 @@ describe("write detection in loop heads", () => {
 
 describe("string pool", () => {
   test("a lone surrogate in a module specifier round-trips", () => {
-    // an escaped surrogate cannot be sliced from source, so it crosses the wire through the
-    // WTF-8 string pool and the decoder must rebuild it. fromCharCode keeps a raw surrogate out
-    // of this file
+    // an escaped lone surrogate crosses the wire through the WTF-8 string pool
     const surrogate = String.fromCharCode(0xd800);
     const module = new Analyzer().setFile(
       "input.js",
@@ -82,7 +81,7 @@ describe("import equals", () => {
         module [strict]
           NS#0  namespace value-module
           A#2  import
-          NS → #0 any
+          NS → #0 namespace
           A → #2
           tsModule
             B#1  const exported"
@@ -94,10 +93,28 @@ describe("ambient global augmentation", () => {
   test("declare global opens an ambient block whose vars are ambient", () => {
     expect(summary(`declare global { var g: number; } g;`)).toMatchInlineSnapshot(`
       "global
+        g#0  var ambient
         module [strict]
-          g → free
-          tsModule
-            g#0  var ambient"
+          g → #0
+          tsModule"
     `);
+  });
+});
+
+describe("deep trees", () => {
+  test("a private name deep in a chain resolves to its class", async () => {
+    const source = `class A { #a = 1; m() { return this.#a${".b(x)".repeat(1000)}; } }`;
+    for (const core of [undefined, await load()]) {
+      expect(analyze(source, { core, path: "input.js" }).diagnostics).toEqual([]);
+    }
+  });
+
+  test("parentOf climbs from the deepest node to the root", () => {
+    const module = analyze("a" + ".b".repeat(100_000), { path: "input.js" });
+    let node: any = (module.ast.body[0] as any).expression;
+    while (node.type === "MemberExpression") node = node.object;
+    let ancestors = 0;
+    for (let parent = module.parentOf(node); parent; parent = module.parentOf(parent)) ancestors++;
+    expect(ancestors).toBe(100_000 + 2);
   });
 });

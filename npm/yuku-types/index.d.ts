@@ -24,6 +24,17 @@ interface FileOptions {
   sourceType?: SourceType;
 }
 
+/**
+ * Yuku's compiled code, which the packages call to parse and analyze. `load` from `yuku-core`
+ * loads the native core, and `load` from `@yuku-core/wasm` the WebAssembly core.
+ */
+interface Core {
+  /** Returns the buffer `yuku-parser` decodes. */
+  parse(source: Uint8Array, options: object): ArrayBuffer;
+  /** Returns the buffer `yuku-analyzer` decodes. */
+  analyze(source: Uint8Array, options: object): ArrayBuffer;
+}
+
 /** Whether a comment came from a line or block source comment. */
 type CommentType = "Line" | "Block";
 
@@ -97,12 +108,12 @@ interface TokenList {
   isLogicalOperator(index: number): boolean;
   isUnaryOperator(index: number): boolean;
   isAssignmentOperator(index: number): boolean;
-  /** Binary precedence, 0 when none. */
+  /** Operator precedence, 0 when none. */
   precedence(index: number): number;
 
   /** A line terminator precedes the token, what ASI looks at. */
   newlineBefore(index: number): boolean;
-  /** The text has a unicode escape. */
+  /** The text has an escape sequence. */
   escaped(index: number): boolean;
   /** A template chunk whose cooked value is undefined. */
   invalidEscape(index: number): boolean;
@@ -374,7 +385,7 @@ type Literal =
 
 interface ArrayPattern extends BaseNode {
   type: "ArrayPattern";
-  elements: Array<BindingPattern | RestElement | null>;
+  elements: Array<BindingPattern | SimpleAssignmentTarget | RestElement | null>;
   decorators?: Decorator[];
   optional?: boolean;
   typeAnnotation?: TSTypeAnnotation | null;
@@ -390,7 +401,7 @@ interface ObjectPattern extends BaseNode {
 
 interface AssignmentPattern extends BaseNode {
   type: "AssignmentPattern";
-  left: BindingPattern;
+  left: BindingPattern | SimpleAssignmentTarget;
   right: Expression;
   decorators?: Decorator[];
   optional?: boolean;
@@ -399,7 +410,7 @@ interface AssignmentPattern extends BaseNode {
 
 interface RestElement extends BaseNode {
   type: "RestElement";
-  argument: BindingPattern;
+  argument: BindingPattern | SimpleAssignmentTarget;
   decorators?: Decorator[];
   optional?: boolean;
   typeAnnotation?: TSTypeAnnotation | null;
@@ -425,7 +436,7 @@ interface BindingProperty extends BaseNode {
   type: "Property";
   kind: "init";
   key: PropertyKey;
-  value: BindingPattern;
+  value: BindingPattern | SimpleAssignmentTarget;
   method: false;
   shorthand: boolean;
   computed: boolean;
@@ -1232,7 +1243,7 @@ interface TSTypeQuery extends BaseNode {
   typeArguments: TSTypeParameterInstantiation | null;
 }
 
-type TSTypeQueryExprName = IdentifierReference | TSQualifiedName | TSImportType;
+type TSTypeQueryExprName = IdentifierReference | TSQualifiedName | ThisExpression | TSImportType;
 
 interface TSImportType extends BaseNode {
   type: "TSImportType";
@@ -1645,10 +1656,11 @@ interface Program extends BaseNode {
 }
 
 /**
- * An element of `Program.body`. Unlike {@link Statement}, this also includes
- * {@link ModuleDeclaration} (`import`/`export`) and {@link Directive}, which
- * are only valid at the top level of a program, never in nested statement
- * positions such as a block, loop, or `if` body.
+ * An element of `Program.body` or `TSModuleBlock.body`. Unlike {@link Statement},
+ * this also includes {@link ModuleDeclaration} (`import`/`export`) and
+ * {@link Directive}, which are never valid in nested statement positions such
+ * as a loop or `if` body. Directives also open a function body, so
+ * `BlockStatement.body` holds them too.
  */
 type ProgramStatement = Statement | ModuleDeclaration | Directive;
 
@@ -1811,6 +1823,7 @@ export type {
   Diagnostic,
   DiagnosticLabel,
   DiagnosticSeverity,
+  Core,
   FileOptions,
   SourceType,
   ModuleKind,

@@ -97,7 +97,7 @@ pub fn parseArrow(parser: *Parser, is_async: bool, arrow_start: u32) Error!?ast.
     );
 }
 
-// rewind on failure so jsx or a `<T>` assertion can win
+// rewind on failure so a parenthesized expression, call, jsx, or `<T>` assertion can win
 pub fn tryParseArrow(parser: *Parser, is_async: bool, arrow_start: u32) Error!?ast.NodeIndex {
     const head = parser.current_token.span.start;
     if (parser.ts_rejected_speculations.contains(head)) return null;

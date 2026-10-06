@@ -1,11 +1,11 @@
 ---
 .title = "Testing",
-.description = "How Yuku is tested: the parser test suite, exact AST validation, codegen conformance, and fuzzing.",
+.description = "How Yuku is tested: the parser test suite, exact AST validation, codegen conformance, semantic analysis against TypeScript, and fuzzing.",
 .author = "Arshad Yaseen",
 .date = @date("2026-07-14T00:00:00"),
 .layout = "page.shtml",
 ---
-Yuku is tested for spec conformance, exact AST shapes, codegen soundness, and behavior under memory pressure.
+Yuku is tested for spec conformance, exact AST shapes, codegen soundness, name resolution, and behavior under memory pressure.
 
 ## [The parser test suite]($section.id('parser-test-suite'))
 
@@ -19,11 +19,17 @@ The parser runs against [parser-test-suite](https://github.com/yuku-toolchain/pa
 
 The snapshots come from an independent parser, [Oxc](https://oxc.rs), so a match means Yuku produces the tree the ESTree ecosystem agrees on, down to every field, position, and comment. Passing files must also walk in source order and pass semantic analysis without a false positive. Yuku passes every test, with zero failures and zero AST mismatches.
 
-The suite runs through the npm packages built from local source, so every run checks the whole chain from the Zig parser to the JavaScript AST, and the WebAssembly build must match the native binary byte for byte.
+The suite runs through the npm packages built from local source, so every run checks the whole chain from the Zig parser to the JavaScript AST, and the WebAssembly core must match the native core byte for byte.
 
 ## [Codegen]($section.id('codegen'))
 
 Every parseable file in the suite is printed under several option sets. Each output must parse again, plain output must reparse to the same AST, and printing must be a fixed point with no comment lost or duplicated. The Zig and JavaScript printers must agree byte for byte, and every identifier in a source map must trace back to its original name and position.
+
+## [Semantic analysis]($section.id('semantic-analysis'))
+
+Every file in the suite is analyzed, along with eight real codebases pinned to a commit: the TypeScript compiler, Vue, Svelte, Preact, three.js, Zod, date-fns, and Excalidraw. The TypeScript checker must resolve every reference, values and types alike, to the same declaration Yuku does, and [@typescript-eslint/scope-manager](https://typescript-eslint.io/packages/scope-manager) must agree on every runtime reference and write, and on every declaration and its scope, over a million comparisons each.
+
+Each codebase is also linked as one project, and every import, re-export, exported name, and relative path must resolve as in a TypeScript program.
 
 ## [Fuzzing]($section.id('fuzzing'))
 

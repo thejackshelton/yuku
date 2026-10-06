@@ -1,5 +1,5 @@
 import { CHILD_KEYS, findAll, WalkContext, _walk, _walkAsync } from "yuku-ast";
-import { analyze as analyzeBytes } from "yuku-engine";
+import { fileOptions } from "yuku-core";
 import { BindingFlags, decode } from "./decode.js";
 
 const _enc = new TextEncoder();
@@ -75,8 +75,7 @@ class Binding {
   hasAll(mask) {
     return (this.flags & mask) === mask;
   }
-  // the acceptance rule of name resolution. an import aliases a binding
-  // whose space one file cannot know, so it is visible in every space
+  // an import aliases a binding of a space one file cannot know
   visibleIn(space) {
     if (this.has(BindingFlags.Import)) return true;
     switch (space) {
@@ -149,7 +148,6 @@ class Import {
     const binding = this.#sem.import.symbolId(this.id);
     return binding === null ? null : this.module.bindings[binding];
   }
-  // `import ns = require("m")` binds the module like `import * as ns`
   get isNamespace() {
     const kind = this.kind;
     return kind === "namespace" || kind === "importEquals";
@@ -256,12 +254,12 @@ export class Module {
   _deps = [];
   _dependents = [];
 
-  constructor(analyzer, path, source, options = {}) {
+  constructor(analyzer, core, path, source, options = {}) {
     this.analyzer = analyzer;
     this.path = path;
     this.source = typeof source === "string" ? source : _dec.decode(source);
     const bytes = typeof source === "string" ? _enc.encode(source) : source;
-    this.#r = decode(analyzeBytes(bytes, { ...options, path }), this.source, path);
+    this.#r = decode(core.analyze(bytes, fileOptions({ ...options, path })), this.source, path);
     this.#sem = this.#r.semantic;
   }
 
@@ -337,18 +335,21 @@ export class Module {
 
   scopeOf(node) {
     const index = this.#r.indexOf(node);
-    // a node created after analysis has no recorded scope
     if (index === undefined) return this.rootScope;
     return this.scopes[this.#sem.nodeScope(index)];
   }
 
   parentOf(node) {
-    // the hashbang is synthesized in JavaScript, so it has no native index
+    // the hashbang is synthesized in JavaScript
     if (node?.type === "Hashbang") return node === this.ast.hashbang ? this.ast : null;
     const index = this.#r.indexOf(node);
     if (index === undefined) return null;
     const parent = this.#r.parentIndex(index);
     return parent < 0 ? null : this.#r.nodeOf(parent);
+  }
+
+  *ancestors(node) {
+    for (let current = node; current !== null; current = this.parentOf(current)) yield current;
   }
 
   nodeAt(offset) {
@@ -360,14 +361,14 @@ export class Module {
     return node;
   }
 
-  // mirrors reference resolution. a binding outside the space does not
-  // shadow, "any" matches by name alone, and a value lookup of `arguments`
-  // stops where the implicit arguments object shadows it
+  // mirrors reference resolution in the binder
   lookup(name, { from = this.rootScope, space = "value" } = {}) {
     const argumentsBarrier = name === "arguments" && (space === "value" || space === "typeof");
     for (let scope = from; scope !== null; scope = scope.parent) {
       const found = scope.find(name);
       if (found !== null && found.visibleIn(space)) return found;
+      const shared = this.#shared(scope, name, space);
+      if (shared !== null) return shared;
       if (argumentsBarrier && isArgumentsScope(scope)) return null;
     }
     return null;
@@ -491,6 +492,16 @@ export class Module {
       this.#importByBinding = map;
     }
     return this.#importByBinding.get(binding);
+  }
+
+  #shared(scope, name, space) {
+    const next = this.#sem.scope.nextBodyId;
+    const shared = scope.kind === "tsModule" ? BindingFlags.Exported : BindingFlags.EnumMember;
+    for (let body = next(scope.id); body !== null && body !== scope.id; body = next(body)) {
+      const found = this.scopes[body].find(name);
+      if (found !== null && found.has(shared) && found.visibleIn(space)) return found;
+    }
+    return null;
   }
 
   #rows(Row, count) {

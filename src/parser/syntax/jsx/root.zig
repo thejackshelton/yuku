@@ -23,7 +23,7 @@ inline fn exitJsxTag(parser: *Parser) void {
     parser.setLexerMode(.normal);
 }
 
-// https://facebook.github.io/jsx/#prod-JSXElement
+// https://react.github.io/jsx/#prod-JSXElement
 pub fn parseJsxExpression(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .less_than);
     return parseJsxElement(parser, .top_level);
@@ -76,7 +76,7 @@ fn parseJsxElement(parser: *Parser, comptime context: JsxElementContext) Error!?
     }, .{ .start = start, .end = parser.tree.span(closing).end });
 }
 
-// https://facebook.github.io/jsx/#prod-JSXFragment
+// https://react.github.io/jsx/#prod-JSXFragment
 fn parseJsxFragment(parser: *Parser) Error!?ast.NodeIndex {
     const start = parser.current_token.span.start;
 
@@ -137,8 +137,8 @@ fn parseJsxFragment(parser: *Parser) Error!?ast.NodeIndex {
     }, .{ .start = start, .end = closing_end });
 }
 
-// https://facebook.github.io/jsx/#prod-JSXSelfClosingElement
-// https://facebook.github.io/jsx/#prod-JSXOpeningElement
+// https://react.github.io/jsx/#prod-JSXSelfClosingElement
+// https://react.github.io/jsx/#prod-JSXOpeningElement
 fn parseJsxOpeningElement(
     parser: *Parser,
     comptime context: JsxElementContext,
@@ -201,7 +201,7 @@ fn parseJsxOpeningElement(
     }, .{ .start = start, .end = end });
 }
 
-// https://facebook.github.io/jsx/#prod-JSXClosingElement
+// https://react.github.io/jsx/#prod-JSXClosingElement
 fn parseJsxClosingElement(
     parser: *Parser,
     opening_name: ast.NodeIndex,
@@ -308,7 +308,7 @@ fn jsxIdentifiersMatch(tree: *const ast.Tree, a: ast.NodeIndex, b: ast.NodeIndex
     return std.mem.eql(u8, name_a, name_b);
 }
 
-// https://facebook.github.io/jsx/#prod-JSXChildren
+// https://react.github.io/jsx/#prod-JSXChildren
 fn parseJsxChildren(parser: *Parser, gt_end: u32) Error!?ast.IndexRange {
     const checkpoint = parser.scratch_b.begin();
     defer parser.scratch_b.reset(checkpoint);
@@ -442,7 +442,7 @@ fn expectJsxChildRightBrace(parser: *Parser, comptime what: []const u8) Error!?u
     return parser.current_token.span.end;
 }
 
-// https://facebook.github.io/jsx/#prod-JSXAttributes
+// https://react.github.io/jsx/#prod-JSXAttributes
 fn parseJsxAttributes(parser: *Parser) Error!?ast.IndexRange {
     const checkpoint = parser.scratch_a.begin();
     defer parser.scratch_a.reset(checkpoint);
@@ -455,7 +455,7 @@ fn parseJsxAttributes(parser: *Parser) Error!?ast.IndexRange {
     return try parser.flushToExtras(&parser.scratch_a, checkpoint);
 }
 
-// https://facebook.github.io/jsx/#prod-JSXAttribute
+// https://react.github.io/jsx/#prod-JSXAttribute
 fn parseJsxAttribute(parser: *Parser) Error!?ast.NodeIndex {
     if (parser.current_token.tag == .left_brace) {
         if (try extension.at(.jsx_attribute, .{parser})) |outcome| return outcome.node;
@@ -479,7 +479,7 @@ fn parseJsxAttribute(parser: *Parser) Error!?ast.NodeIndex {
     }, .{ .start = name_start, .end = parser.tree.span(value).end });
 }
 
-// https://facebook.github.io/jsx/#prod-JSXAttributeName
+// https://react.github.io/jsx/#prod-JSXAttributeName
 fn parseJsxAttributeName(parser: *Parser) Error!?ast.NodeIndex {
     const name = try parseJsxIdentifier(parser) orelse return null;
     if (parser.current_token.tag != .colon) return name;
@@ -492,7 +492,7 @@ fn parseJsxAttributeName(parser: *Parser) Error!?ast.NodeIndex {
     );
 }
 
-// https://facebook.github.io/jsx/#prod-JSXAttributeValue
+// https://react.github.io/jsx/#prod-JSXAttributeValue
 fn parseJsxAttributeValue(parser: *Parser) Error!?ast.NodeIndex {
     switch (parser.current_token.tag) {
         .string_literal => return literals.parseStringLiteral(parser),
@@ -602,7 +602,7 @@ fn parseJsxSpreadAttribute(parser: *Parser) Error!?ast.NodeIndex {
     );
 }
 
-// https://facebook.github.io/jsx/#prod-JSXElementName
+// https://react.github.io/jsx/#prod-JSXElementName
 fn parseJsxElementName(parser: *Parser) Error!?ast.NodeIndex {
     if (try extension.at(.jsx_element_name, .{parser})) |outcome| return outcome.node;
     if (parser.current_token.tag != .jsx_identifier) {

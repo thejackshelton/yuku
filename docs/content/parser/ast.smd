@@ -100,7 +100,7 @@ for (tree.tokens) |token| {
 ```zig
 token.tag.isKeyword()             // also isReserved, isIdentifierLike, isNumericLiteral,
                                   // and the operator kinds
-token.tag.precedence()            // binary precedence, 0 when none
+token.tag.precedence()            // operator precedence, 0 when none
 token.hasLineTerminatorBefore()   // what ASI reads
 token.isEscaped()                 // also hasInvalidEscape and hasLoneSurrogates
 ```

@@ -967,7 +967,7 @@ const Printer = struct {
     }
 
     fn emit_directive(self: *Self, d: *const ast.Directive) Error!void {
-        // an escaped `"use strict"` is not a directive, so the raw lexeme must survive
+        // an escaped `"use strict"` does not enable strict mode, so the raw lexeme must survive
         switch (self.nodeData(d.expression)) {
             .string_literal => |lit| try self.writeString(lit.raw),
             else => try self.emit(d.expression),
@@ -1154,7 +1154,7 @@ const Printer = struct {
         if (s.await) try self.out.writeStr(" await");
         try self.out.space();
         try self.out.writeByte('(');
-        // `for (async of …)` is forbidden, it would read as `for await`
+        // `for (async of …)` is forbidden, it could start the arrow `async of => …`
         const wrap_async = !s.await and isNamed(self.tree, s.left, "async");
         if (wrap_async) try self.out.writeByte('(');
         try self.printForLeft(s.left);
