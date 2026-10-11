@@ -2,6 +2,37 @@
 
 What changed in each release of Yuku, newest first. Releases up to 0.14.0 are listed on [GitHub](https://github.com/yuku-toolchain/yuku/releases).
 
+## 0.18.1
+
+### Changes
+
+- parser: join a surrogate pair in a string however it is written (#239 by @arshad-yaseen)
+- parser: span a type predicate's type without its stripped parentheses (#239 by @arshad-yaseen)
+- codegen: print every attached comment (#238 by @arshad-yaseen)
+- codegen: strip an uninitialized `const` as ambient (#239 by @arshad-yaseen)
+- codegen: reprint a hashbang verbatim (#239 by @arshad-yaseen)
+
+## 0.18.0
+
+### Breaking
+
+- all: pass the core strings (#233 by @arshad-yaseen)
+  - `Core.parse` and `Core.analyze` take a string. Decode UTF-8 bytes before passing them to a core. `parse` and `setFile` still accept bytes.
+
+### Changes
+
+- all: decode and walk trees of any depth (#228 by @arshad-yaseen)
+- parser: attach comments at any depth (#233 by @arshad-yaseen)
+- parser: reject `import` and `export` in a script or below the top level (#234 by @arshad-yaseen)
+- parser: reject decorators on both sides of `export` (#234 by @arshad-yaseen)
+- parser: decode entities in JSX text and attribute values (#234 by @arshad-yaseen)
+- parser: report duplicate exports and redeclarations as TypeScript does (#234 by @arshad-yaseen)
+- analyzer: merge `declare module "m"` augmentations into `m` (#234 by @arshad-yaseen)
+- analyzer: resolve `ns` in `import x = ns.T` in the namespace space (#234 by @arshad-yaseen)
+- analyzer: mark the members of a declare enum ambient (#233 by @arshad-yaseen)
+- codegen: keep decorators before `export` (#234 by @arshad-yaseen)
+- types: correct pattern unions and the `findAll` parameter
+
 ## 0.17.0
 
 ### Breaking

@@ -8,6 +8,7 @@ const meta = @import("meta.zig");
 const Symbol = parser.traverser.semantic.Symbol;
 const Reference = parser.traverser.semantic.Reference;
 const ModuleFlags = parser.semantic.module_record.Flags;
+const node_data = @typeInfo(ast.NodeData).@"union";
 
 const Writer = std.Io.Writer;
 
@@ -100,44 +101,34 @@ fn writeSemanticConstants(w: *Writer) !void {
     });
     try writeArray(w, "IMPORT_PHASES", &.{ "source", "defer" });
     try writeArray(w, "IMPORT_KINDS", &.{
-        "named", "namespace", "sideEffect", "importEquals", "dynamic", "require",
+        "named", "namespace", "sideEffect", "importEquals", "dynamic", "require", "augmentation",
     });
     try writeArray(w, "EXPORT_KINDS", &.{
         "named", "reExport", "namespace", "star", "equals", "global",
     });
 
-    // one entry per Reference.Space value, in enum order, plus the
-    // mirrored Space.inTypePosition lookup
-    const space_fields = @typeInfo(Reference.Space).@"enum".fields;
+    // one entry per Reference.Space value, in enum order
     const space_names = comptime blk: {
-        var names: [space_fields.len][]const u8 = undefined;
-        for (space_fields, 0..) |field, i| names[i] = field.name;
+        const field_names = @typeInfo(Reference.Space).@"enum".field_names;
+        var names: [field_names.len][]const u8 = undefined;
+        for (field_names, 0..) |name, i| names[i] = name;
         break :blk names;
     };
     try writeArray(w, "REFERENCE_SPACES", &space_names);
-    const space_type_position = comptime blk: {
-        var vals: [space_fields.len][]const u8 = undefined;
-        for (space_fields, 0..) |field, i| {
-            const space = @field(Reference.Space, field.name);
-            vals[i] = if (space.inTypePosition()) "true" else "false";
-        }
-        break :blk vals;
-    };
-    try writeArrayRaw(w, "REFERENCE_TYPE_POSITION", &space_type_position);
 
     try w.writeAll("const BindingFlags = Object.freeze({\n");
-    inline for (@typeInfo(Symbol.Flags).@"struct".fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "_")) continue;
+    inline for (@typeInfo(Symbol.Flags).@"struct".field_names) |name| {
+        if (comptime std.mem.eql(u8, name, "_")) continue;
         try w.print("  {s}: 1 << {d},\n", .{
-            comptime jsFlagName(field.name),
-            @bitOffsetOf(Symbol.Flags, field.name),
+            comptime jsFlagName(name),
+            @bitOffsetOf(Symbol.Flags, name),
         });
     }
-    try w.print("  Variable: {d},\n", .{@as(u32, @bitCast(Symbol.variable))});
-    try w.print("  Import: {d},\n", .{@as(u32, @bitCast(Symbol.any_import))});
-    try w.print("  ValueSpace: {d},\n", .{@as(u32, @bitCast(Symbol.value_space))});
-    try w.print("  TypeSpace: {d},\n", .{@as(u32, @bitCast(Symbol.type_space))});
-    try w.print("  NamespaceSpace: {d},\n", .{@as(u32, @bitCast(Symbol.namespace_space))});
+    try w.print("  Variable: {d},\n", .{@backingInt(Symbol.variable)});
+    try w.print("  Import: {d},\n", .{@backingInt(Symbol.any_import)});
+    try w.print("  ValueSpace: {d},\n", .{@backingInt(Symbol.value_space)});
+    try w.print("  TypeSpace: {d},\n", .{@backingInt(Symbol.type_space)});
+    try w.print("  NamespaceSpace: {d},\n", .{@backingInt(Symbol.namespace_space)});
     try w.writeAll("});\n");
 }
 
@@ -163,14 +154,15 @@ pub fn tokenName(comptime snake: []const u8) []const u8 {
 fn writeTokenTables(w: *Writer) !void {
     @setEvalBranchQuota(50_000);
     try w.writeAll("const TokenKind = Object.freeze({\n");
-    inline for (@typeInfo(ast.TokenTag).@"enum".fields) |field| {
-        try w.print("  {s}: {d},\n", .{ comptime tokenName(field.name), field.value });
+    const info = @typeInfo(ast.TokenTag).@"enum";
+    inline for (info.field_names, info.field_values) |name, value| {
+        try w.print("  {s}: {d},\n", .{ comptime tokenName(name), value });
     }
     try w.writeAll("});\n");
 }
 
 fn tokenFlagBit(comptime flag: ast.TokenFlag) u8 {
-    return 1 << @intFromEnum(flag);
+    return 1 << @backingInt(flag);
 }
 
 fn writeTokenList(w: *Writer) !void {
@@ -680,8 +672,8 @@ pub fn generateWalkTables(w: *Writer) !void {
         \\}
         \\
     );
-    inline for (@typeInfo(ast.NodeData).@"union".fields) |field| {
-        if (comptime specialChildKeysOf(field.name)) |entry| {
+    inline for (node_data.field_names, node_data.field_types) |node_name, Payload| {
+        if (comptime specialChildKeysOf(node_name)) |entry| {
             inline for (entry.types) |t| {
                 try w.print("ck(\"{s}\", [", .{t});
                 inline for (entry.keys, 0..) |k, i| {
@@ -691,13 +683,15 @@ pub fn generateWalkTables(w: *Writer) !void {
                 try w.writeAll("]);\n");
             }
         } else {
-            try w.print("ck(\"{s}\", [", .{comptime meta.estreeType(field.name)});
-            if (@typeInfo(field.type) == .@"struct") {
+            try w.print("ck(\"{s}\", [", .{comptime meta.estreeType(node_name)});
+            if (@typeInfo(Payload) == .@"struct") {
+                const info = @typeInfo(Payload).@"struct";
                 comptime var first = true;
-                inline for (std.meta.fields(field.type)) |f| {
-                    if (f.type == ast.NodeIndex or f.type == ast.IndexRange) {
+                inline for (info.field_names, info.field_types) |field_name, Field| {
+                    if (Field == ast.NodeIndex or Field == ast.IndexRange) {
                         if (!first) try w.writeAll(", ");
-                        try w.print("\"{s}\"", .{comptime meta.estreeField(field.name, f.name)});
+                        const key = comptime meta.estreeField(node_name, field_name);
+                        try w.print("\"{s}\"", .{key});
                         first = false;
                     }
                 }
@@ -713,13 +707,13 @@ pub fn generateWalkTables(w: *Writer) !void {
         \\const TYPES = [
         \\
     );
-    inline for (@typeInfo(ast.NodeData).@"union".fields) |field| {
-        if (comptime specialChildKeysOf(field.name)) |entry| {
+    inline for (node_data.field_names) |node_name| {
+        if (comptime specialChildKeysOf(node_name)) |entry| {
             inline for (entry.types) |t| {
                 try w.print("  \"{s}\",\n", .{t});
             }
         } else {
-            try w.print("  \"{s}\",\n", .{comptime meta.estreeType(field.name)});
+            try w.print("  \"{s}\",\n", .{comptime meta.estreeType(node_name)});
         }
     }
     try w.writeAll(
@@ -737,17 +731,17 @@ fn writeChildTables(w: *Writer) !void {
     @setEvalBranchQuota(1_000_000);
     // kind 0 is a NodeIndex, kind 1 a range with its length in slot+1
     try w.writeAll("const CHILD_SLOTS = [\n");
-    inline for (@typeInfo(ast.NodeData).@"union".fields) |field| {
+    inline for (node_data.field_types) |Payload| {
         try w.writeAll("  [");
-        if (@typeInfo(field.type) == .@"struct") {
+        if (@typeInfo(Payload) == .@"struct") {
             comptime var first = true;
-            inline for (std.meta.fields(field.type), 0..) |f, i| {
-                if (f.type == ast.NodeIndex or f.type == ast.IndexRange) {
+            inline for (@typeInfo(Payload).@"struct".field_types, 0..) |Field, i| {
+                if (Field == ast.NodeIndex or Field == ast.IndexRange) {
                     if (!first) try w.writeAll(", ");
-                    const kind: u32 = if (f.type == ast.NodeIndex) 0 else 1;
+                    const kind: u32 = if (Field == ast.NodeIndex) 0 else 1;
                     try w.print("{d}, {d}", .{
                         kind,
-                        comptime rt.u32SlotForField(field.type, i) + rt.NODE_HEADER_U32S,
+                        comptime rt.u32SlotForField(Payload, i) + rt.NODE_HEADER_U32S,
                     });
                     first = false;
                 }
@@ -758,8 +752,8 @@ fn writeChildTables(w: *Writer) !void {
     try w.writeAll("];\n");
 
     try w.writeAll("const IS_NODE = [\n");
-    inline for (@typeInfo(ast.NodeData).@"union".fields) |field| {
-        const materialized = comptime if (specialChildKeysOf(field.name)) |entry|
+    inline for (node_data.field_names) |node_name| {
+        const materialized = comptime if (specialChildKeysOf(node_name)) |entry|
             entry.types.len != 0
         else
             true;
@@ -776,7 +770,7 @@ fn isIdentChar(c: u8) bool {
 // whole-identifier match, so a slot name never matches inside a longer identifier
 fn usesIdent(body: []const u8, name: []const u8) bool {
     var i: usize = 0;
-    while (std.mem.indexOfPos(u8, body, i, name)) |p| : (i = p + 1) {
+    while (std.mem.findPos(u8, body, i, name)) |p| : (i = p + 1) {
         const before_ok = p == 0 or !isIdentChar(body[p - 1]);
         const after = p + name.len;
         const after_ok = after >= body.len or !isIdentChar(body[after]);
@@ -807,15 +801,15 @@ fn writeCaseOpen(w: *Writer, comptime tag: usize, comptime T: type, body: []cons
 fn writeNodeCases(w: *Writer, mode: Mode) !void {
     @setEvalBranchQuota(100_000);
     var body_buf: [16 * 1024]u8 = undefined;
-    inline for (@typeInfo(ast.NodeData).@"union".fields, 0..) |field, tag| {
+    inline for (node_data.field_names, node_data.field_types, 0..) |node_name, Payload, tag| {
         var body_w: Writer = .fixed(&body_buf);
-        if (comptime specialChildKeysOf(field.name) != null) {
-            try writeSpecialCase(&body_w, field.name);
+        if (comptime specialChildKeysOf(node_name) != null) {
+            try writeSpecialCase(&body_w, node_name);
         } else {
-            try writeGenericCase(&body_w, field.name, field.type);
+            try writeGenericCase(&body_w, node_name, Payload);
         }
         const body = body_w.buffered();
-        try writeCaseOpen(w, tag, field.type, body);
+        try writeCaseOpen(w, tag, Payload, body);
         switch (mode) {
             .parser => try writeChildCallsWithDepth(w, body),
             .analyzer => try w.writeAll(body),
@@ -828,13 +822,13 @@ fn writeChildCallsWithDepth(w: *Writer, body: []const u8) !void {
     const calls = [_][]const u8{ "node", "nodeArr", "nodeArrHoles", "fnParams" };
     var written: usize = 0;
     var open: usize = 0;
-    while (std.mem.indexOfScalarPos(u8, body, open, '(')) |paren| : (open = paren + 1) {
+    while (std.mem.findScalarPos(u8, body, open, '(')) |paren| : (open = paren + 1) {
         var name_start = paren;
         while (name_start > 0 and isIdentChar(body[name_start - 1])) name_start -= 1;
         for (calls) |call| {
             if (!std.mem.eql(u8, body[name_start..paren], call)) continue;
-            const close = std.mem.indexOfScalarPos(u8, body, paren, ')').?;
-            std.debug.assert(std.mem.indexOfScalar(u8, body[paren + 1 .. close], '(') == null);
+            const close = std.mem.findScalarPos(u8, body, paren, ')').?;
+            std.debug.assert(std.mem.findScalar(u8, body[paren + 1 .. close], '(') == null);
             try w.print("{s}, depth + 1", .{body[written..close]});
             written = close;
         }
@@ -872,17 +866,18 @@ fn writeStructFields(
     comptime sel: FieldSelection,
 ) !void {
     if (@typeInfo(T) != .@"struct") return;
-    inline for (std.meta.fields(T), 0..) |f, i| {
-        const is_ts = comptime isTsField(tag_name, f.name);
+    const info = @typeInfo(T).@"struct";
+    inline for (info.field_names, info.field_types, 0..) |field_name, Field, i| {
+        const is_ts = comptime isTsField(tag_name, field_name);
         const include = switch (sel) {
             .all => true,
             .non_ts => !is_ts,
             .ts_only => is_ts,
         };
         if (!include) continue;
-        const js = comptime meta.estreeField(tag_name, f.name);
+        const js = comptime meta.estreeField(tag_name, field_name);
         if (sel == .ts_only) try w.print("r.{s} = ", .{js}) else try w.print(", {s}: ", .{js});
-        try writeFieldExpr(w, tag_name, f.name, T, i, f.type);
+        try writeFieldExpr(w, tag_name, field_name, T, i, Field);
         if (sel == .ts_only) try w.writeAll("; ");
     }
 }
@@ -1284,11 +1279,12 @@ fn writeSpecialCase(w: *Writer, comptime name: []const u8) !void {
         , .{ sp, sp + 1, sr, sr, sdec, sdec + 1, mo, sta, sta });
     } else if (comptime eql(u8, name, "jsx_text")) {
         const sv = comptime slotOf(ast.JSXText, "value");
+        const sr = comptime slotOf(ast.JSXText, "raw");
         try emit(w,
             \\
-            \\      const t = str(f{d}, f{d});
-            \\      return {{ type: "JSXText", start, end, value: t, raw: t }};
-        , .{ sv, sv + 1 });
+            \\      const value = str(f{d}, f{d});
+            \\      return {{ type: "JSXText", start, end, value, raw: str(f{d}, f{d}) }};
+        , .{ sv, sv + 1, sr, sr + 1 });
     } else if (comptime eql(u8, name, "ts_function_type")) {
         const stp = comptime slotOf(ast.TSFunctionType, "type_parameters");
         const sp = comptime slotOf(ast.TSFunctionType, "params");
@@ -1696,8 +1692,7 @@ fn writeSemanticAccessors(w: *Writer) !void {
         \\        node: (i) => node({[n]s}),
         \\        nodeIndex: (i) => {[n]s},
         \\        space: (i) => REFERENCE_SPACES[({[bits]s} >> {[sshift]d}) & {[smask]d}],
-        \\        inTypePosition: (i) =>
-        \\          REFERENCE_TYPE_POSITION[({[bits]s} >> {[sshift]d}) & {[smask]d}],
+        \\        inTypePosition: (i) => (({[bits]s} >> {[pbit]d}) & 1) !== 0,
         \\        isWrite: (i) => (({[bits]s} >> {[wbit]d}) & 1) !== 0,
         \\        symbolId: (i) => _id({[sym]s}),
         \\        start: (i) => startOf({[n]s}),
@@ -1711,6 +1706,7 @@ fn writeSemanticAccessors(w: *Writer) !void {
         .bits = comptime cell("references", Ref, "bits"),
         .sshift = sem_rt.REFERENCE_SPACE_SHIFT,
         .smask = sem_rt.REFERENCE_SPACE_MASK,
+        .pbit = sem_rt.REFERENCE_TYPE_POSITION_BIT,
         .wbit = sem_rt.REFERENCE_WRITE_BIT,
         .sym = comptime cell("references", Ref, "symbol"),
     });
@@ -1727,6 +1723,7 @@ fn writeSemanticAccessors(w: *Writer) !void {
         \\            ? IMPORT_PHASES[({[bits]s} >> {[pbit]d}) & 1]
         \\            : null,
         \\        node: (i) => node({[n]s}),
+        \\        scopeId: (i) => _id({[scope]s}),
         \\      }},
         \\
     , .{
@@ -1739,6 +1736,7 @@ fn writeSemanticAccessors(w: *Writer) !void {
         .hpbit = sem_rt.IMPORT_HAS_PHASE_BIT,
         .pbit = sem_rt.IMPORT_PHASE_BIT,
         .n = comptime cell("imports", Imp, "node"),
+        .scope = comptime cell("imports", Imp, "scope"),
     });
     try w.print(
         \\      export: {{
@@ -1835,7 +1833,9 @@ fn isTsField(comptime tag: []const u8, comptime field: []const u8) bool {
 
 fn hasAnyTsField(comptime tag: []const u8, comptime T: type) bool {
     if (@typeInfo(T) != .@"struct") return false;
-    inline for (std.meta.fields(T)) |f| if (comptime isTsField(tag, f.name)) return true;
+    inline for (@typeInfo(T).@"struct".field_names) |field_name| {
+        if (comptime isTsField(tag, field_name)) return true;
+    }
     return false;
 }
 

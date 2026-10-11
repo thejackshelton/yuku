@@ -12,6 +12,13 @@ const ChildInfo = struct {
     end: u32,
 };
 
+const Frame = struct {
+    host: ast.NodeIndex,
+    node_end: u32,
+    children_start: u32,
+    next_child: u32,
+};
+
 pub fn attach(tree: *ast.Tree, raw: []const ast.Comment) Error!void {
     std.debug.assert(tree.root != .null);
     const alloc = tree.allocator();
@@ -42,14 +49,17 @@ pub fn attach(tree: *ast.Tree, raw: []const ast.Comment) Error!void {
         .cursor = 0,
         .alloc = alloc,
         .scratch = .empty,
+        .frames = .empty,
     };
     defer ctx.scratch.deinit(alloc);
+    defer ctx.frames.deinit(alloc);
     try ctx.scratch.ensureTotalCapacity(alloc, 256);
+    try ctx.frames.ensureTotalCapacity(alloc, 64);
 
-    try ctx.walkAt(tree.root, ctx.spans[@intFromEnum(tree.root)], .null);
+    try ctx.walk(tree.root);
 
     while (ctx.cursor < raw.len) : (ctx.cursor += 1) {
-        ctx.write(@intFromEnum(tree.root), .inside, false);
+        ctx.write(@backingInt(tree.root), .inside, false);
     }
 
     const counts = try alloc.alloc(u32, node_count);
@@ -87,57 +97,75 @@ const Ctx = struct {
     cursor: usize,
     alloc: std.mem.Allocator,
     scratch: std.ArrayList(ChildInfo),
+    frames: std.ArrayList(Frame),
 
-    fn walkAt(
+    fn walk(self: *Ctx, root: ast.NodeIndex) Error!void {
+        std.debug.assert(self.frames.items.len == 0);
+        try self.walkEnter(root, self.spans[@backingInt(root)].end, .null);
+
+        while (self.frames.items.len > 0) {
+            const frame = &self.frames.items[self.frames.items.len - 1];
+            const prev: ChildInfo = if (frame.next_child > frame.children_start)
+                self.scratch.items[frame.next_child - 1]
+            else
+                .{ .idx = .null, .start = 0, .end = 0 };
+            if (frame.next_child < self.scratch.items.len) {
+                const child = self.scratch.items[frame.next_child];
+                frame.next_child += 1;
+                try self.consumeBetween(frame.host, prev.idx, prev.end, child.idx, child.start);
+                // invalidates `frame`
+                try self.walkEnter(child.idx, child.end, frame.host);
+            } else {
+                try self.consumeBetween(frame.host, prev.idx, prev.end, .null, frame.node_end);
+                self.scratch.shrinkRetainingCapacity(frame.children_start);
+                _ = self.frames.pop();
+            }
+        }
+    }
+
+    fn walkEnter(
         self: *Ctx,
         node: ast.NodeIndex,
-        node_span: ast.Span,
+        node_end: u32,
         parent_host: ast.NodeIndex,
     ) Error!void {
         if (self.cursor >= self.raw.len) return;
-        if (self.raw[self.cursor].span.start >= node_span.end) return;
+        if (self.raw[self.cursor].span.start >= node_end) return;
         const inside_host = if (self.hosts(node)) node else parent_host;
         std.debug.assert(self.hosts(inside_host));
 
-        const checkpoint = self.scratch.items.len;
-        defer self.scratch.shrinkRetainingCapacity(checkpoint);
-
+        const children_start: u32 = @intCast(self.scratch.items.len);
         try self.collectChildren(node);
-        const children = self.scratch.items[checkpoint..];
-        sortByStart(children);
-
-        var prev_idx: ast.NodeIndex = .null;
-        var prev_end: u32 = 0;
-        for (children) |child| {
-            try self.consumeBetween(inside_host, prev_idx, prev_end, child.idx, child.start);
-            try self.walkAt(child.idx, .{ .start = child.start, .end = child.end }, inside_host);
-            prev_idx = child.idx;
-            prev_end = child.end;
-        }
-
-        try self.consumeBetween(inside_host, prev_idx, prev_end, .null, node_span.end);
+        sortByStart(self.scratch.items[children_start..]);
+        try self.frames.append(self.alloc, .{
+            .host = inside_host,
+            .node_end = node_end,
+            .children_start = children_start,
+            .next_child = children_start,
+        });
     }
 
     // a parameter list has no ESTree node, so it bounds the comments inside its parens but
     // never hosts one
     inline fn hosts(self: *const Ctx, node: ast.NodeIndex) bool {
-        return self.data_items[@intFromEnum(node)] != .formal_parameters;
+        return self.data_items[@backingInt(node)] != .formal_parameters;
     }
 
     fn collectChildren(self: *Ctx, node: ast.NodeIndex) Error!void {
-        switch (self.data_items[@intFromEnum(node)]) {
+        switch (self.data_items[@backingInt(node)]) {
             // quasis are literal text, never comment hosts
             .template_literal => |t| try self.pushRange(t.expressions),
             .ts_template_literal_type => |t| try self.pushRange(t.types),
             inline else => |payload| {
                 const T = @TypeOf(payload);
                 if (@typeInfo(T) != .@"struct") return;
-                inline for (std.meta.fields(T)) |f| {
-                    if (f.type == ast.NodeIndex) {
-                        const child = @field(payload, f.name);
+                const info = @typeInfo(T).@"struct";
+                inline for (info.field_names, info.field_types) |name, Field| {
+                    if (Field == ast.NodeIndex) {
+                        const child = @field(payload, name);
                         if (child != .null) try self.pushChild(child);
-                    } else if (f.type == ast.IndexRange) {
-                        try self.pushRange(@field(payload, f.name));
+                    } else if (Field == ast.IndexRange) {
+                        try self.pushRange(@field(payload, name));
                     }
                 }
             },
@@ -152,12 +180,12 @@ const Ctx = struct {
 
     // a parameter is its pattern in ESTree, with the same span
     inline fn pushChild(self: *Ctx, child: ast.NodeIndex) Error!void {
-        const node = switch (self.data_items[@intFromEnum(child)]) {
+        const node = switch (self.data_items[@backingInt(child)]) {
             .formal_parameter => |param| param.pattern,
             else => child,
         };
-        const s = self.spans[@intFromEnum(node)];
-        std.debug.assert(std.meta.eql(s, self.spans[@intFromEnum(child)]));
+        const s = self.spans[@backingInt(node)];
+        std.debug.assert(std.meta.eql(s, self.spans[@backingInt(child)]));
         try self.scratch.append(self.alloc, .{ .idx = node, .start = s.start, .end = s.end });
     }
 
@@ -177,18 +205,18 @@ const Ctx = struct {
 
             if (has_prev and has_next) {
                 if (self.sameLine(c.span.end, next_start)) {
-                    self.write(@intFromEnum(next_idx), .before, true);
+                    self.write(@backingInt(next_idx), .before, true);
                 } else if (self.sameLine(prev_end, c.span.start)) {
-                    self.write(@intFromEnum(prev_idx), .after, true);
+                    self.write(@backingInt(prev_idx), .after, true);
                 } else {
-                    self.write(@intFromEnum(next_idx), .before, false);
+                    self.write(@backingInt(next_idx), .before, false);
                 }
             } else if (has_next) {
-                self.write(@intFromEnum(next_idx), .before, self.sameLine(c.span.end, next_start));
+                self.write(@backingInt(next_idx), .before, self.sameLine(c.span.end, next_start));
             } else if (has_prev) {
-                self.write(@intFromEnum(prev_idx), .after, self.sameLine(prev_end, c.span.start));
+                self.write(@backingInt(prev_idx), .after, self.sameLine(prev_end, c.span.start));
             } else {
-                self.write(@intFromEnum(host_node), .inside, false);
+                self.write(@backingInt(host_node), .inside, false);
             }
             self.cursor += 1;
         }

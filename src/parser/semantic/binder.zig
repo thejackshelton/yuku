@@ -60,12 +60,12 @@ pub const Symbol = struct {
 
         /// True when `a` and `b` have at least one flag in common.
         pub inline fn intersects(a: Flags, b: Flags) bool {
-            return @as(u32, @bitCast(a)) & @as(u32, @bitCast(b)) != 0;
+            return @backingInt(a) & @backingInt(b) != 0;
         }
 
         /// The union of two flag sets.
         pub inline fn merge(a: Flags, b: Flags) Flags {
-            return @bitCast(@as(u32, @bitCast(a)) | @as(u32, @bitCast(b)));
+            return @fromBackingInt(@backingInt(a) | @backingInt(b));
         }
 
         /// True for a `var` that hoists past intermediate blocks, which
@@ -197,10 +197,8 @@ pub const Symbol = struct {
         /// A TypeScript function.
         pub const function: Flags = blk: {
             var f = value_space;
-            f.function_scoped_var = false;
             f.function = false;
             f.value_module = false;
-            f.class = false;
             break :blk f;
         };
 
@@ -291,7 +289,9 @@ pub const Reference = struct {
         write: bool = false,
         /// The declaration space this position resolves in.
         space: Space = .value,
-        _: u4 = 0,
+        /// True when the use is erased with the types.
+        type_position: bool = false,
+        _: u3 = 0,
     };
 
     /// The declaration space a syntactic position resolves in, matching
@@ -315,20 +315,12 @@ pub const Reference = struct {
         value,
         /// A type use.
         type,
-        /// The qualifier of a dotted type name, `ns` in `ns.T`.
+        /// The qualifier of a dotted name, `ns` in `ns.T` and `import x = ns.T`.
         namespace,
         /// A value use inside a type, such as the entity of a `typeof` query.
         typeof,
         /// An alias position that accepts every space, such as `export { x }`.
         any,
-
-        /// True for positions inside a type-only subtree.
-        pub inline fn inTypePosition(self: Space) bool {
-            return switch (self) {
-                .type, .namespace, .typeof => true,
-                .value, .any => false,
-            };
-        }
     };
 };
 
@@ -368,15 +360,15 @@ pub const Semantic = struct {
     /// The symbol with the given id.
     pub inline fn symbol(self: Semantic, id: SymbolId) Symbol {
         std.debug.assert(id != .none);
-        std.debug.assert(@intFromEnum(id) < self.symbols.len);
-        return self.symbols[@intFromEnum(id)];
+        std.debug.assert(@backingInt(id) < self.symbols.len);
+        return self.symbols[@backingInt(id)];
     }
 
     /// The reference with the given id.
     pub inline fn reference(self: Semantic, id: ReferenceId) Reference {
         std.debug.assert(id != .none);
-        std.debug.assert(@intFromEnum(id) < self.references.len);
-        return self.references[@intFromEnum(id)];
+        std.debug.assert(@backingInt(id) < self.references.len);
+        return self.references[@backingInt(id)];
     }
 
     /// The scope with the given id.
@@ -395,10 +387,10 @@ pub const Semantic = struct {
     /// ```
     pub fn symbolOf(self: Semantic, node: ast.NodeIndex) ?SymbolId {
         std.debug.assert(node != .null);
-        std.debug.assert(@intFromEnum(node) < self.node_symbols.len);
-        const declared = self.node_symbols[@intFromEnum(node)];
+        std.debug.assert(@backingInt(node) < self.node_symbols.len);
+        const declared = self.node_symbols[@backingInt(node)];
         if (declared != .none) return declared;
-        const ref = self.node_references[@intFromEnum(node)];
+        const ref = self.node_references[@backingInt(node)];
         if (ref == .none) return null;
         const resolved = self.reference(ref).symbol;
         return if (resolved != .none) resolved else null;
@@ -408,8 +400,8 @@ pub const Semantic = struct {
     /// not a reference site.
     pub fn referenceOf(self: Semantic, node: ast.NodeIndex) ?ReferenceId {
         std.debug.assert(node != .null);
-        std.debug.assert(@intFromEnum(node) < self.node_references.len);
-        const id = self.node_references[@intFromEnum(node)];
+        std.debug.assert(@backingInt(node) < self.node_references.len);
+        const id = self.node_references[@backingInt(node)];
         return if (id != .none) id else null;
     }
 
@@ -417,21 +409,21 @@ pub const Semantic = struct {
     /// to the scope it creates.
     pub inline fn scopeOf(self: Semantic, node: ast.NodeIndex) sc.ScopeId {
         std.debug.assert(node != .null);
-        std.debug.assert(@intFromEnum(node) < self.node_scopes.len);
-        return self.node_scopes[@intFromEnum(node)];
+        std.debug.assert(@backingInt(node) < self.node_scopes.len);
+        return self.node_scopes[@backingInt(node)];
     }
 
     /// The structural parent of `node`, or `null` at the root.
     pub fn parentOf(self: Semantic, node: ast.NodeIndex) ?ast.NodeIndex {
         std.debug.assert(node != .null);
-        std.debug.assert(@intFromEnum(node) < self.node_parents.len);
-        const parent = self.node_parents[@intFromEnum(node)];
+        std.debug.assert(@backingInt(node) < self.node_parents.len);
+        const parent = self.node_parents[@backingInt(node)];
         return if (parent != .null) parent else null;
     }
 
     /// Walks from `node` up to the root, yielding `node` first.
     pub fn ancestors(self: Semantic, node: ast.NodeIndex) AncestorIterator {
-        std.debug.assert(node == .null or @intFromEnum(node) < self.node_parents.len);
+        std.debug.assert(node == .null or @backingInt(node) < self.node_parents.len);
         return .{ .node_parents = self.node_parents, .current = node };
     }
 
@@ -454,8 +446,8 @@ pub const Semantic = struct {
     /// Every use site of `id`, in source order. Declaration sites are not uses.
     pub fn uses(self: Semantic, id: SymbolId) []const ReferenceId {
         std.debug.assert(id != .none);
-        std.debug.assert(@intFromEnum(id) < self.use_ranges.len);
-        const range = self.use_ranges[@intFromEnum(id)];
+        std.debug.assert(@backingInt(id) < self.use_ranges.len);
+        const range = self.use_ranges[@backingInt(id)];
         return self.use_ids[range.start..][0..range.len];
     }
 
@@ -470,17 +462,17 @@ pub const Semantic = struct {
     /// ```
     pub fn binding(self: Semantic, scope_id: sc.ScopeId, name: []const u8) ?SymbolId {
         std.debug.assert(scope_id != .none);
-        std.debug.assert(@intFromEnum(scope_id) < self.scope_maps.len);
-        return self.scope_maps[@intFromEnum(scope_id)].get(name) orelse
-            self.hoisting_variables[@intFromEnum(scope_id)].get(name);
+        std.debug.assert(@backingInt(scope_id) < self.scope_maps.len);
+        return self.scope_maps[@backingInt(scope_id)].get(name) orelse
+            self.hoisting_variables[@backingInt(scope_id)].get(name);
     }
 
     /// Every symbol declared directly in `scope`. A hoisting `var` appears
     /// in its hoist target only.
     pub fn bindings(self: Semantic, scope_id: sc.ScopeId) BindingIterator {
         std.debug.assert(scope_id != .none);
-        std.debug.assert(@intFromEnum(scope_id) < self.scope_maps.len);
-        return .{ .inner = self.scope_maps[@intFromEnum(scope_id)].valueIterator() };
+        std.debug.assert(@backingInt(scope_id) < self.scope_maps.len);
+        return .{ .inner = self.scope_maps[@backingInt(scope_id)].valueIterator() };
     }
 
     /// The nearest binding of `name` visible in `space` from `scope`, walking up the
@@ -510,7 +502,7 @@ pub const Semantic = struct {
         };
         var it = self.scopes.ancestors(scope_id);
         while (it.next()) |ancestor| {
-            if (self.scope_maps[@intFromEnum(ancestor)].get(name)) |id| {
+            if (self.scope_maps[@backingInt(ancestor)].get(name)) |id| {
                 if (self.symbol(id).flags.visibleIn(space)) return id;
             }
             if (bodies.sharedMember(ancestor, name, space)) |id| return id;
@@ -551,7 +543,7 @@ pub const Semantic = struct {
             if (self.index >= self.list.len) return null;
             const i = self.index;
             self.index += 1;
-            return .{ .id = @enumFromInt(i), .scope = self.list[i] };
+            return .{ .id = @fromBackingInt(i), .scope = self.list[i] };
         }
     };
 
@@ -564,8 +556,8 @@ pub const Semantic = struct {
         pub fn next(self: *AncestorIterator) ?ast.NodeIndex {
             const node = self.current;
             if (node == .null) return null;
-            std.debug.assert(@intFromEnum(node) < self.node_parents.len);
-            self.current = self.node_parents[@intFromEnum(node)];
+            std.debug.assert(@backingInt(node) < self.node_parents.len);
+            self.current = self.node_parents[@backingInt(node)];
             return node;
         }
     };
@@ -590,7 +582,7 @@ pub const Semantic = struct {
             if (self.index >= self.symbols.len) return null;
             const i = self.index;
             self.index += 1;
-            return .{ .id = @enumFromInt(i), .symbol = self.symbols[i] };
+            return .{ .id = @fromBackingInt(i), .symbol = self.symbols[i] };
         }
     };
 
@@ -603,7 +595,7 @@ pub const Semantic = struct {
             if (self.index >= self.references.len) return null;
             const i = self.index;
             self.index += 1;
-            return .{ .id = @enumFromInt(i), .reference = self.references[i] };
+            return .{ .id = @fromBackingInt(i), .reference = self.references[i] };
         }
     };
 };
@@ -621,13 +613,13 @@ const Bodies = struct {
         space: Reference.Space,
     ) ?SymbolId {
         // the tracker sizes `next` on demand, past its end no scope is a body
-        if (@intFromEnum(scope_id) >= self.next.len) return null;
-        var body = self.next[@intFromEnum(scope_id)];
+        if (@backingInt(scope_id) >= self.next.len) return null;
+        var body = self.next[@backingInt(scope_id)];
         if (body == .none) return null;
-        const in_enum = self.scopes[@intFromEnum(scope_id)].kind != .ts_module;
-        while (body != scope_id) : (body = self.next[@intFromEnum(body)]) {
-            const id = self.scope_maps[@intFromEnum(body)].get(name) orelse continue;
-            const flags = self.symbols[@intFromEnum(id)].flags;
+        const in_enum = self.scopes[@backingInt(scope_id)].kind != .ts_module;
+        while (body != scope_id) : (body = self.next[@backingInt(body)]) {
+            const id = self.scope_maps[@backingInt(body)].get(name) orelse continue;
+            const flags = self.symbols[@backingInt(id)].flags;
             const shared = if (in_enum) flags.enum_member else flags.exported;
             if (shared and flags.visibleIn(space)) return id;
         }
@@ -672,6 +664,7 @@ pub const SymbolTracker = struct {
     /// `export` declaration.
     export_state: ExportState = .none,
     ambient: bool = false,
+    excluded_imports: Symbol.Flags,
 
     saved_stack: std.ArrayList(SavedContext) = .empty,
 
@@ -690,6 +683,8 @@ pub const SymbolTracker = struct {
         is_write: bool,
         /// The declaration space the identifier resolves in.
         space: Reference.Space = .value,
+        /// The identifier is erased with the types.
+        type_position: bool = false,
     };
 
     const DeclPair = struct { sid: SymbolId, node: ast.NodeIndex };
@@ -708,6 +703,7 @@ pub const SymbolTracker = struct {
             .tree = tree,
             .allocator = alloc,
             .ambient = tree.lang == .dts,
+            .excluded_imports = if (tree.isTs()) .{} else Symbol.any_import,
         };
 
         const nodes: u32 = @intCast(tree.nodes.len);
@@ -747,9 +743,10 @@ pub const SymbolTracker = struct {
                 switch (decl.kind) {
                     .@"var" => {
                         const target = scope.hoistTarget();
-                        // module-level functions are lexical, elsewhere (and in ts) `var` merges
-                        var excludes = Symbol.Excludes.function_scoped_var;
-                        if (!self.tree.isTs() and scope.get(target).kind == .module) {
+                        // ts and module-level functions never merge with `var`
+                        var excludes =
+                            Symbol.Excludes.function_scoped_var.merge(self.excluded_imports);
+                        if (self.tree.isTs() or scope.get(target).kind == .module) {
                             excludes.function = true;
                         }
                         self.pending = .{
@@ -764,7 +761,7 @@ pub const SymbolTracker = struct {
                             .const_var = decl.kind != .let,
                             .ambient = ambient,
                         },
-                        .excludes = Symbol.Excludes.block_scoped_var,
+                        .excludes = Symbol.Excludes.block_scoped_var.merge(self.excluded_imports),
                         .scope = scope.current,
                     },
                 }
@@ -788,12 +785,12 @@ pub const SymbolTracker = struct {
 
                 self.pending = .{
                     .flags = .{ .function = true, .ambient = ambient },
-                    .excludes = if (self.tree.isTs())
+                    .excludes = (if (self.tree.isTs())
                         Symbol.Excludes.function
                     else if (var_like)
                         Symbol.Excludes.function_scoped_var
                     else
-                        Symbol.Excludes.block_scoped_var,
+                        Symbol.Excludes.block_scoped_var).merge(self.excluded_imports),
                     .scope = target,
                 };
 
@@ -809,7 +806,7 @@ pub const SymbolTracker = struct {
                         .class = true,
                         .ambient = cls.declare or self.ambient,
                     },
-                    .excludes = Symbol.Excludes.class,
+                    .excludes = Symbol.Excludes.class.merge(self.excluded_imports),
                     .scope = if (is_decl) scope.currentScope().parent else exprNameScope(scope),
                 };
                 // expression names are local
@@ -841,7 +838,10 @@ pub const SymbolTracker = struct {
                         .{ .type_import = true }
                     else
                         .{ .import = true },
-                    .excludes = Symbol.Excludes.import_binding,
+                    .excludes = if (self.tree.isTs())
+                        Symbol.Excludes.import_binding
+                    else
+                        Symbol.Excludes.import_binding.merge(Symbol.value_space),
                     .scope = scope.current,
                 };
             },
@@ -902,6 +902,7 @@ pub const SymbolTracker = struct {
                         Symbol.Excludes.regular_enum,
                     .scope = scope.current,
                 };
+                if (decl.declare) self.ambient = true;
             },
 
             .ts_module_declaration => |decl| {
@@ -1028,7 +1029,7 @@ pub const SymbolTracker = struct {
             .binding_identifier => |id| {
                 const flags = self.pending.flags;
                 // in a type, only type parameters and parameters declare
-                if (ref_ctx.space.inTypePosition() and !flags.type_parameter and !flags.parameter) {
+                if (ref_ctx.type_position and !flags.type_parameter and !flags.parameter) {
                     return;
                 }
 
@@ -1042,7 +1043,7 @@ pub const SymbolTracker = struct {
                     var iter = scope.ancestors(scope.current);
                     while (iter.next()) |s| {
                         if (s == self.pending.scope) break;
-                        const table = &self.hoisting_variables.items[@intFromEnum(s)];
+                        const table = &self.hoisting_variables.items[@backingInt(s)];
                         const gop = try table.getOrPut(self.allocator, self.tree.string(id.name));
                         if (!gop.found_existing) gop.value_ptr.* = sym_id;
                     }
@@ -1057,6 +1058,7 @@ pub const SymbolTracker = struct {
                 _ = try self.addReference(id.name, scope.current, index, .{
                     .write = ref_ctx.is_write,
                     .space = ref_ctx.space,
+                    .type_position = ref_ctx.type_position,
                 });
             },
             // `v is T` parses `v` as an identifier_name but it references the
@@ -1073,6 +1075,7 @@ pub const SymbolTracker = struct {
                 if (!self.symbol(param).flags.parameter) return;
                 _ = try self.addReference(name, scope.current, pred.parameter_name, .{
                     .space = .typeof,
+                    .type_position = true,
                 });
             },
             // members resolve lexically inside the body like tsc, and their
@@ -1204,34 +1207,25 @@ pub const SymbolTracker = struct {
         node: ast.NodeIndex,
         scopes: []const sc.Scope,
     ) Allocator.Error!SymbolId {
-        const target = if (self.pending.scope == self.global_body) .root else self.pending.scope;
+        const target = self.pendingTarget();
         std.debug.assert(target != .none);
-        std.debug.assert(@intFromEnum(target) < self.scope_maps.items.len);
+        std.debug.assert(@backingInt(target) < self.scope_maps.items.len);
         std.debug.assert(node != .null);
 
         const name_str = self.tree.string(name);
-        const target_idx = @intFromEnum(target);
+        const target_idx = @backingInt(target);
 
-        const is_import = self.pending.flags.intersects(Symbol.any_import);
-        const export_context = target_idx < self.export_contexts.items.len and
-            self.export_contexts.items[target_idx];
-        const exported = self.export_state != .none or (export_context and !is_import);
+        const exported = self.pendingExported(target);
         // an export merges across the bodies of its namespace
         const own = self.binding(target, name_str);
-        const shared = if (own == null and exported and self.shares_members)
-            self.bodies(scopes).sharedMember(target, name_str, .any)
-        else
-            null;
+        const shared = if (own == null) self.sharedExport(target, name_str, scopes) else null;
         if (shared) |existing| {
             try self.scope_maps.items[target_idx].put(self.allocator, name_str, existing);
         }
 
         const id = if (own orelse shared) |existing| sid: {
-            const sym = &self.symbols.items[@intFromEnum(existing)];
-            // an ambient class and function merge
-            var excludes = self.pending.excludes;
-            if (sym.flags.ambient or self.pending.flags.ambient) excludes.function = false;
-            if (!sym.flags.intersects(excludes)) {
+            const sym = &self.symbols.items[@backingInt(existing)];
+            if (!conflicts(self.pending, sym.flags)) {
                 var merged = sym.flags.merge(self.pending.flags);
                 merged.exported = merged.exported or exported;
                 merged.is_default = merged.is_default or self.export_state == .default;
@@ -1242,7 +1236,7 @@ pub const SymbolTracker = struct {
             break :sid existing;
         } else sid: {
             std.debug.assert(self.symbols.items.len < std.math.maxInt(u32));
-            const new_id: SymbolId = @enumFromInt(@as(u32, @intCast(self.symbols.items.len)));
+            const new_id: SymbolId = @fromBackingInt(@intCast(self.symbols.items.len));
             var flags = self.pending.flags;
             flags.exported = exported;
             flags.is_default = self.export_state == .default;
@@ -1261,6 +1255,28 @@ pub const SymbolTracker = struct {
         return id;
     }
 
+    fn pendingTarget(self: *const SymbolTracker) sc.ScopeId {
+        return if (self.pending.scope == self.global_body) .root else self.pending.scope;
+    }
+
+    fn pendingExported(self: *const SymbolTracker, target: sc.ScopeId) bool {
+        const target_idx = @backingInt(target);
+        const is_import = self.pending.flags.intersects(Symbol.any_import);
+        const export_context = target_idx < self.export_contexts.items.len and
+            self.export_contexts.items[target_idx];
+        return self.export_state != .none or (export_context and !is_import);
+    }
+
+    fn sharedExport(
+        self: *const SymbolTracker,
+        target: sc.ScopeId,
+        name: []const u8,
+        scopes: []const sc.Scope,
+    ) ?SymbolId {
+        if (!self.shares_members or !self.pendingExported(target)) return null;
+        return self.bodies(scopes).sharedMember(target, name, .any);
+    }
+
     /// Records an identifier reference at `node` in `scope`.
     pub fn addReference(
         self: *SymbolTracker,
@@ -1273,7 +1289,7 @@ pub const SymbolTracker = struct {
         std.debug.assert(node != .null);
         std.debug.assert(self.references.items.len < std.math.maxInt(u32));
 
-        const id: ReferenceId = @enumFromInt(@as(u32, @intCast(self.references.items.len)));
+        const id: ReferenceId = @fromBackingInt(@intCast(self.references.items.len));
         try self.references.append(self.allocator, .{
             .name = name,
             .scope = scope,
@@ -1286,21 +1302,21 @@ pub const SymbolTracker = struct {
     /// The symbol with the given id.
     pub inline fn symbol(self: *const SymbolTracker, id: SymbolId) Symbol {
         std.debug.assert(id != .none);
-        std.debug.assert(@intFromEnum(id) < self.symbols.items.len);
-        return self.symbols.items[@intFromEnum(id)];
+        std.debug.assert(@backingInt(id) < self.symbols.items.len);
+        return self.symbols.items[@backingInt(id)];
     }
 
     /// The name node of the earliest declaration of `id`.
     pub fn firstDeclOf(self: *const SymbolTracker, id: SymbolId) ast.NodeIndex {
         std.debug.assert(id != .none);
-        std.debug.assert(@intFromEnum(id) < self.first_decls.items.len);
-        return self.first_decls.items[@intFromEnum(id)];
+        std.debug.assert(@backingInt(id) < self.first_decls.items.len);
+        return self.first_decls.items[@backingInt(id)];
     }
 
     /// The binding of `name` declared directly in `scope`, excluding
     /// hoisting `var`s passing through.
     pub fn ownBinding(self: *const SymbolTracker, scope: sc.ScopeId, name: []const u8) ?SymbolId {
-        const idx = @intFromEnum(scope);
+        const idx = @backingInt(scope);
         if (idx >= self.scope_maps.items.len) return null;
         return self.scope_maps.items[idx].get(name);
     }
@@ -1309,7 +1325,7 @@ pub const SymbolTracker = struct {
     /// passing through on its way to its hoist target.
     pub fn binding(self: *const SymbolTracker, scope: sc.ScopeId, name: []const u8) ?SymbolId {
         if (self.ownBinding(scope, name)) |id| return id;
-        const idx = @intFromEnum(scope);
+        const idx = @backingInt(scope);
         if (idx < self.hoisting_variables.items.len) {
             return self.hoisting_variables.items[idx].get(name);
         }
@@ -1330,9 +1346,9 @@ pub const SymbolTracker = struct {
         scope_id: sc.ScopeId,
         value: bool,
     ) Allocator.Error!void {
-        const count = @intFromEnum(scope_id) + 1;
+        const count = @backingInt(scope_id) + 1;
         try padTo(bool, &self.export_contexts, self.allocator, count, false);
-        self.export_contexts.items[@intFromEnum(scope_id)] = value;
+        self.export_contexts.items[@backingInt(scope_id)] = value;
     }
 
     // of a `declare module "m"`
@@ -1359,15 +1375,15 @@ pub const SymbolTracker = struct {
 
     fn addBody(self: *SymbolTracker, last: *sc.ScopeId, body: sc.ScopeId) Allocator.Error!void {
         std.debug.assert(last.* != body);
-        const count = @intFromEnum(body) + 1;
+        const count = @backingInt(body) + 1;
         try padTo(sc.ScopeId, &self.next_bodies, self.allocator, count, .none);
         const next = self.next_bodies.items;
-        std.debug.assert(next[@intFromEnum(body)] == .none);
+        std.debug.assert(next[@backingInt(body)] == .none);
         if (last.* == .none) {
-            next[@intFromEnum(body)] = body;
+            next[@backingInt(body)] = body;
         } else {
-            next[@intFromEnum(body)] = next[@intFromEnum(last.*)];
-            next[@intFromEnum(last.*)] = body;
+            next[@backingInt(body)] = next[@backingInt(last.*)];
+            next[@backingInt(last.*)] = body;
             self.shares_members = true;
         }
         last.* = body;
@@ -1403,7 +1419,7 @@ pub const SymbolTracker = struct {
         const decl_nodes = try allocator.alloc(ast.NodeIndex, self.decl_pairs.items.len);
         for (self.symbols.items) |*s| s.decls = .{ .start = 0, .len = 0 };
         for (self.decl_pairs.items) |pair| {
-            self.symbols.items[@intFromEnum(pair.sid)].decls.len += 1;
+            self.symbols.items[@backingInt(pair.sid)].decls.len += 1;
         }
         var decl_offset: u32 = 0;
         for (self.symbols.items) |*s| {
@@ -1414,7 +1430,7 @@ pub const SymbolTracker = struct {
         }
         std.debug.assert(decl_offset == self.decl_pairs.items.len);
         for (self.decl_pairs.items) |pair| {
-            const s = &self.symbols.items[@intFromEnum(pair.sid)];
+            const s = &self.symbols.items[@backingInt(pair.sid)];
             decl_nodes[s.decls.start + s.decls.len] = pair.node;
             s.decls.len += 1;
         }
@@ -1422,12 +1438,12 @@ pub const SymbolTracker = struct {
         const node_symbols = try allocator.alloc(SymbolId, self.tree.nodes.len);
         @memset(node_symbols, .none);
         for (self.decl_pairs.items) |pair| {
-            node_symbols[@intFromEnum(pair.node)] = pair.sid;
+            node_symbols[@backingInt(pair.node)] = pair.sid;
         }
         const node_references = try allocator.alloc(ReferenceId, self.tree.nodes.len);
         @memset(node_references, .none);
         for (self.references.items, 0..) |ref, i| {
-            node_references[@intFromEnum(ref.node)] = @enumFromInt(@as(u32, @intCast(i)));
+            node_references[@backingInt(ref.node)] = @fromBackingInt(@intCast(i));
         }
 
         const members = self.bodies(scopes.list);
@@ -1443,7 +1459,7 @@ pub const SymbolTracker = struct {
             ref.symbol = blk: {
                 var it = scopes.ancestors(ref.scope);
                 while (it.next()) |ancestor| {
-                    const idx = @intFromEnum(ancestor);
+                    const idx = @backingInt(ancestor);
                     if (self.scope_maps.items[idx].getAdapted(name, pctx)) |id| {
                         // a binding outside the reference's space does not shadow
                         const sym = self.symbol(id);
@@ -1468,7 +1484,7 @@ pub const SymbolTracker = struct {
         const use_ranges = try allocator.alloc(Range, sym_count);
         for (use_ranges) |*r| r.* = .{ .start = 0, .len = 0 };
         for (self.references.items) |ref| {
-            if (ref.symbol != .none) use_ranges[@intFromEnum(ref.symbol)].len += 1;
+            if (ref.symbol != .none) use_ranges[@backingInt(ref.symbol)].len += 1;
         }
         var use_offset: u32 = 0;
         for (use_ranges) |*r| {
@@ -1479,8 +1495,8 @@ pub const SymbolTracker = struct {
         const use_ids = try allocator.alloc(ReferenceId, use_offset);
         for (self.references.items, 0..) |ref, i| {
             if (ref.symbol == .none) continue;
-            const r = &use_ranges[@intFromEnum(ref.symbol)];
-            use_ids[r.start + r.len] = @enumFromInt(@as(u32, @intCast(i)));
+            const r = &use_ranges[@backingInt(ref.symbol)];
+            use_ids[r.start + r.len] = @fromBackingInt(@intCast(i));
             r.len += 1;
         }
 
@@ -1501,6 +1517,22 @@ pub const SymbolTracker = struct {
         };
     }
 };
+
+/// The symbol the pending declaration of `name` merges into, the scope's own binding or an
+/// export another body of its namespace shares.
+pub fn prior(tracker: *const SymbolTracker, name: []const u8, scopes: []const sc.Scope) ?SymbolId {
+    const target = tracker.pendingTarget();
+    return tracker.binding(target, name) orelse tracker.sharedExport(target, name, scopes);
+}
+
+/// Whether `pending` cannot merge into a symbol with `flags`.
+pub fn conflicts(pending: SymbolTracker.PendingBinding, flags: Symbol.Flags) bool {
+    var excludes = pending.excludes;
+    // a class and a function merge only when the class is ambient
+    if (pending.flags.class and pending.flags.ambient) excludes.function = false;
+    if (pending.flags.function and flags.class and flags.ambient) excludes.class = false;
+    return flags.intersects(excludes);
+}
 
 // infer variables exist only in their conditional's true branch, class type
 // parameters are hidden in static members (TS2302) and computed keys (TS2467)
@@ -1523,7 +1555,7 @@ fn visibleAt(
             else => true,
         };
     }
-    if (!ref.flags.space.inTypePosition()) return true;
+    if (!ref.flags.type_position) return true;
     if (sym.flags.parameter) {
         const type_parameters = typeParametersOf(tree, scopes.get(sym.scope).node);
         if (type_parameters == .null) return true;
@@ -1574,10 +1606,10 @@ fn inSubtree(
     subtree: ast.NodeIndex,
 ) bool {
     var child = node;
-    var parent = node_parents[@intFromEnum(child)];
+    var parent = node_parents[@backingInt(child)];
     while (parent != .null) : ({
         child = parent;
-        parent = node_parents[@intFromEnum(parent)];
+        parent = node_parents[@backingInt(parent)];
     }) {
         if (parent == root) return child == subtree;
     }
@@ -1591,10 +1623,10 @@ fn typeParameterHidden(
     owner: ast.NodeIndex,
 ) bool {
     var child = ref_node;
-    var parent = node_parents[@intFromEnum(child)];
+    var parent = node_parents[@backingInt(child)];
     while (parent != .null) : ({
         child = parent;
-        parent = node_parents[@intFromEnum(parent)];
+        parent = node_parents[@backingInt(parent)];
     }) {
         switch (tree.data(parent)) {
             .class => |cls| if (parent == owner and child == cls.super_class) return true,
@@ -1607,7 +1639,7 @@ fn typeParameterHidden(
                     memberOwner(node_parents, parent) == owner) return true;
             },
             .class_body => {
-                if (node_parents[@intFromEnum(parent)] != owner) continue;
+                if (node_parents[@backingInt(parent)] != owner) continue;
                 return switch (tree.data(child)) {
                     .method_definition => |m| m.static,
                     .property_definition => |p| p.static,
@@ -1623,8 +1655,8 @@ fn typeParameterHidden(
 }
 
 fn memberOwner(node_parents: []const ast.NodeIndex, member: ast.NodeIndex) ast.NodeIndex {
-    const body = node_parents[@intFromEnum(member)];
-    return if (body == .null) .null else node_parents[@intFromEnum(body)];
+    const body = node_parents[@backingInt(member)];
+    return if (body == .null) .null else node_parents[@backingInt(body)];
 }
 
 // the conditional whose extends clause holds `infer_node`
@@ -1753,7 +1785,7 @@ pub fn exportsImplicitly(tree: *const ast.Tree) bool {
     return hasModuleSyntax(tree, body) and !hasExportStatement(tree, body);
 }
 
-fn hasModuleSyntax(tree: *const ast.Tree, statements: []const ast.NodeIndex) bool {
+pub fn hasModuleSyntax(tree: *const ast.Tree, statements: []const ast.NodeIndex) bool {
     for (statements) |stmt| {
         switch (tree.data(stmt)) {
             .import_declaration,

@@ -26,6 +26,8 @@ pub const Import = struct {
     /// The smallest node identifying the record, the specifier, the call,
     /// or the whole declaration.
     node: ast.NodeIndex,
+    /// The body of an `.augmentation`, where its declarations bind.
+    scope: sc.ScopeId = .none,
 
     pub const Kind = enum(u3) {
         /// `import d from "m"` and `import { a as b } from "m"`
@@ -40,6 +42,8 @@ pub const Import = struct {
         dynamic,
         /// `require("m")` at any depth, only when `require` is a free name
         require,
+        /// `declare module "m" {}` in a module, merging its declarations into `m`
+        augmentation,
     };
 };
 
@@ -118,10 +122,13 @@ pub fn collect(tree: *ast.Tree, sem: *const Semantic) Allocator.Error!Records {
         .exports_implicitly = binder.exportsImplicitly(tree),
     };
 
-    for (tree.extra(tree.data(tree.root).program.body)) |statement| {
-        try collector.statement(statement);
-    }
+    const body = tree.extra(tree.data(tree.root).program.body);
+    for (body) |statement| try collector.statement(statement);
     try collector.sweep();
+    // in a script, `declare module "m"` declares `m` instead
+    if (!collector.flags.uses_import_meta and !binder.hasModuleSyntax(tree, body)) {
+        collector.dropAugmentations();
+    }
 
     return .{
         .imports = collector.imports.items,
@@ -158,9 +165,41 @@ const Collector = struct {
             .export_all_declaration => |decl| try self.exportAll(decl, index),
             .ts_export_assignment => |decl| try self.exportAssignment(decl, index),
             .ts_namespace_export_declaration => |decl| try self.namespaceExport(decl, index),
+            .ts_module_declaration => |decl| {
+                if (self.literal(decl.id)) |specifier| {
+                    try self.augmentation(specifier, decl, index);
+                }
+                if (self.exports_implicitly) try self.declarationNames(index, true);
+            },
             // type only, as `export declare` is
             else => if (self.exports_implicitly) try self.declarationNames(index, true),
         }
+    }
+
+    fn augmentation(
+        self: *Collector,
+        specifier: ast.String,
+        decl: ast.TSModuleDeclaration,
+        index: ast.NodeIndex,
+    ) Allocator.Error!void {
+        if (decl.body == .null) return;
+        try self.addImport(.{
+            .kind = .augmentation,
+            .specifier = specifier,
+            .type_only = true,
+            .node = index,
+            .scope = self.sem.scopeOf(decl.body),
+        });
+    }
+
+    fn dropAugmentations(self: *Collector) void {
+        var kept: usize = 0;
+        for (self.imports.items) |record| {
+            if (record.kind == .augmentation) continue;
+            self.imports.items[kept] = record;
+            kept += 1;
+        }
+        self.imports.shrinkRetainingCapacity(kept);
     }
 
     fn importDeclaration(
@@ -411,7 +450,7 @@ const Collector = struct {
 
     fn sweep(self: *Collector) Allocator.Error!void {
         for (0..self.tree.nodes.len) |i| {
-            const index: ast.NodeIndex = @enumFromInt(@as(u32, @intCast(i)));
+            const index: ast.NodeIndex = @fromBackingInt(@intCast(i));
             switch (self.tree.data(index)) {
                 .import_expression => |expr| try self.dynamicImport(expr, index),
                 .call_expression => |call| try self.requireCall(call, index),
@@ -421,7 +460,7 @@ const Collector = struct {
         }
 
         for (self.sem.references) |ref| {
-            if (ref.symbol != .none or ref.flags.space.inTypePosition()) continue;
+            if (ref.symbol != .none or ref.flags.type_position) continue;
             const name = self.tree.string(ref.name);
             if (std.mem.eql(u8, name, "require")) {
                 self.flags.uses_require = true;

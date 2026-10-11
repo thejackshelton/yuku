@@ -17,6 +17,8 @@ import {
   CHAR_LT,
   CHAR_NUL,
   CHAR_OPEN_BRACE,
+  CHAR_OPEN_BRACKET,
+  CHAR_OPEN_PAREN,
   CHAR_SINGLE_QUOTE,
   CHAR_SPACE,
   CHAR_TAB,
@@ -112,7 +114,8 @@ const CTX_NO_CALL = 1 << 6;
 const CTX_NO_INSTANTIATION = 1 << 7;
 const CTX_NO_JSX_TAG = 1 << 8;
 const CTX_TAGGED = 1 << 9;
-const CTX_ITEM = 1 << 10;
+const CTX_DEFER_TRAILING = 1 << 10;
+const CTX_NO_DECORATORS = 1 << 11;
 
 const TPREC_TRAILING = 1;
 const TPREC_UNION = 2;
@@ -190,15 +193,16 @@ const FIXED_STRING = table({
   TSObjectKeyword: "object",
   TSIntrinsicKeyword: "intrinsic",
   TSJSDocUnknownType: "?",
-  JSXOpeningFragment: "<>",
-  JSXClosingFragment: "</>",
 });
 
 interface Link {
   node: Node;
   inner: number;
   wrap: boolean;
-  commented: boolean;
+  comments: Comment[] | null;
+  // a cast strip removes, open for its comments
+  stripped: boolean;
+  deferTrailing: boolean;
 }
 
 export function print(
@@ -222,6 +226,7 @@ class Printer extends Output {
   indentDepth = 0;
   pendingSemi = false;
   skipLeadingOf: Node | null = null;
+  deferTrailingOf: Node | null = null;
   inAssignTarget = false;
   inPrologue = false;
   declNoIn = false;
@@ -230,10 +235,11 @@ class Printer extends Output {
   bindingProperty = false;
   restrictedLen = -1;
   restrictedOpened = false;
-  // the list item whose trailing comments wait for its separator
+  // the node whose trailing comments follow its parent's next token
   owed: Node | null = null;
 
   chainDepth = 0;
+  links: Link[] = [];
 
   constructor(options: PrintOptions, mappings: Mappings | null) {
     super(options.pretty, mappings);
@@ -302,10 +308,18 @@ class Printer extends Output {
       case "TSImportEqualsDeclaration":
       case "TSExportAssignment":
         return true;
+      // its comments alone would leave a bare `,`
+      case "ImportSpecifier":
+        if (node.importKind === "type") return true;
+        break;
+      case "ExportSpecifier":
+        if (node.exportKind === "type") return true;
+        break;
     }
     if (this.hasPrintedComments(node)) return false;
     switch (node.type) {
       case "VariableDeclaration":
+        return isAmbient(node);
       case "FunctionDeclaration":
       case "FunctionExpression":
       case "ClassDeclaration":
@@ -326,8 +340,6 @@ class Printer extends Output {
           node.importKind === "type" ||
           (node.specifiers.length > 0 && !hasValueImportSpecifier(node.specifiers))
         );
-      case "ImportSpecifier":
-        return node.importKind === "type";
       case "ExportNamedDeclaration":
         if (node.declaration != null) {
           return node.exportKind === "type" || this.stripsToNothing(node.declaration);
@@ -339,7 +351,6 @@ class Printer extends Output {
       case "ExportDefaultDeclaration":
         return isDeclaration(node.declaration) && this.stripsToNothing(node.declaration);
       case "ExportAllDeclaration":
-      case "ExportSpecifier":
         return node.exportKind === "type";
     }
     return false;
@@ -419,6 +430,25 @@ class Printer extends Output {
     }
   }
 
+  // a line comment breaks the node open like a block
+  emitInsideCommentsInline(host: Node): void {
+    if (this.comments === "none") return;
+    const list = host.comments;
+    if (list == null) return;
+    let any = false;
+    for (const c of list) {
+      if (c.position !== "inside" || !this.allowComment(c)) continue;
+      if (c.type === "Line") return this.emitInsideComments(host);
+      any = true;
+    }
+    if (!any) return;
+    for (const c of list) {
+      if (c.position !== "inside" || !this.allowComment(c)) continue;
+      if (this.pretty && needsSpaceBeforeInlineComment(this.lastByte())) this.writeToken(" ");
+      this.writeCommentBody(c);
+    }
+  }
+
   // compact mode defers `;` so a closing `}` can drop it
   softSemi(): void {
     if (this.pretty) this.writeToken(";");
@@ -446,19 +476,11 @@ class Printer extends Output {
     }
 
     const wrap = this.needsParens(node, type, ctx);
-    const inner = wrap ? 0 : ctx & ~CTX_ITEM;
+    const inner = wrap ? 0 : ctx & ~CTX_DEFER_TRAILING;
     if (wrap) this.writeToken("(");
-    const list = this.comments !== "none" ? node.comments : undefined;
-    if (list != null && list.length > 0) {
-      const savedLead = this.lead;
-      this.emitLeadingComments(node, list);
-      this.lead = savedLead;
-      this.emitNode(node, type, inner);
-      if ((ctx & CTX_ITEM) !== 0) this.owed = node;
-      else this.emitTrailingComments(list);
-    } else {
-      this.emitNode(node, type, inner);
-    }
+    const list = this.openComments(node);
+    this.emitNode(node, type, inner);
+    this.closeComments(node, list, (ctx & CTX_DEFER_TRAILING) !== 0);
     if (wrap) this.writeToken(")");
   }
 
@@ -469,12 +491,16 @@ class Printer extends Output {
       case "TSInterfaceDeclaration":
       case "TSNamespaceExportDeclaration":
         return true;
+      case "ImportSpecifier":
+        return node.importKind === "type";
+      case "ExportSpecifier":
+        return node.exportKind === "type";
       case "TSAsExpression":
       case "TSSatisfiesExpression":
       case "TSTypeAssertion":
       case "TSNonNullExpression":
       case "TSInstantiationExpression":
-        this.emitExpr(this.stripped(node), ctx);
+        this.emitStrippedOperand(node, this.stripped(node), ctx);
         return true;
       case "TSEnumDeclaration":
         if (!node.declare) {
@@ -497,7 +523,7 @@ class Printer extends Output {
         return true;
       case "TSParameterProperty":
         this.diagnose(node, "parameter properties cannot be stripped to JavaScript");
-        this.emitExpr(node.parameter, ctx);
+        this.emitStrippedOperand(node, node.parameter, ctx);
         return true;
     }
     return false;
@@ -736,9 +762,9 @@ class Printer extends Output {
       case "DoWhileStatement":
         return this.emitDoWhileStatement(node);
       case "BreakStatement":
-        return this.printJump("break", node.label);
+        return this.printJump("break", node.label, node);
       case "ContinueStatement":
-        return this.printJump("continue", node.label);
+        return this.printJump("continue", node.label, node);
       case "SwitchStatement":
         return this.emitSwitchStatement(node);
       case "TryStatement":
@@ -752,6 +778,7 @@ class Printer extends Output {
         return this.writeToken(";");
       case "DebuggerStatement":
         this.writeToken("debugger");
+        this.emitInsideCommentsInline(node);
         return this.softSemi();
       case "WithStatement":
         return this.emitWithStatement(node);
@@ -774,7 +801,7 @@ class Printer extends Output {
         return this.writeName(node.name);
       case "ClassDeclaration":
       case "ClassExpression":
-        return this.emitClass(node);
+        return this.emitClass(node, ctx);
       case "ClassBody":
         return this.emitClassBody(node);
       case "MethodDefinition":
@@ -856,9 +883,17 @@ class Printer extends Output {
         this.emitValue(node.expression);
         return this.writeToken("}");
       case "JSXEmptyExpression":
-        return;
+        return this.emitInsideCommentsInline(node);
+      case "JSXOpeningFragment":
+        this.writeToken("<");
+        this.emitInsideCommentsInline(node);
+        return this.writeToken(">");
+      case "JSXClosingFragment":
+        this.writeToken("</");
+        this.emitInsideCommentsInline(node);
+        return this.writeToken(">");
       case "JSXText":
-        return this.writeLiteral(node.value);
+        return this.writeLiteral(node.raw || node.value);
       case "JSXSpreadChild":
         return this.printJSXSpread(node.expression);
     }
@@ -886,7 +921,9 @@ class Printer extends Output {
     const first = this.stripped(head);
     if (!isChainLink(first)) return this.emitExpr(head, headCtx);
 
-    const links: Link[] = [];
+    const links = this.links;
+    const base = links.length;
+    this.openStrippedCasts(head, first, false);
     let link = this.openLink(first, headCtx);
     for (;;) {
       const nextHead = this.linkHead(link.node);
@@ -897,38 +934,64 @@ class Printer extends Output {
         break;
       }
       links.push(link);
+      this.openStrippedCasts(nextHead, next, false);
       link = this.openLink(next, nextCtx);
     }
     for (;;) {
       this.spillWhenFull();
-      this.emitLinkSuffix(link.node, link.inner);
+      if (!link.stripped) this.emitLinkSuffix(link.node, link.inner);
       this.closeLink(link);
-      const outer = links.pop();
-      if (outer === undefined) break;
-      link = outer;
+      if (links.length === base) break;
+      link = links.pop()!;
     }
   }
 
   openLink(node: Node, ctx: number): Link {
     const wrap = this.needsParens(node, node.type, ctx);
     if (wrap) this.writeToken("(");
-    let commented = false;
-    if (this.comments !== "none") {
-      const list = node.comments;
-      if (list != null && list.length > 0) {
-        commented = true;
-        const savedLead = this.lead;
-        this.emitLeadingComments(node, list);
-        this.lead = savedLead;
-      }
-    }
+    const comments = this.openComments(node);
     this.recordMapping(node);
-    return { node, inner: wrap ? 0 : ctx, wrap, commented };
+    return {
+      node,
+      inner: wrap ? 0 : ctx & ~CTX_DEFER_TRAILING,
+      wrap,
+      comments,
+      stripped: false,
+      deferTrailing: (ctx & CTX_DEFER_TRAILING) !== 0,
+    };
   }
 
   closeLink(link: Link): void {
-    if (link.commented) this.emitTrailingComments(link.node.comments!);
+    this.closeComments(link.node, link.comments, link.deferTrailing);
     if (link.wrap) this.writeToken(")");
+  }
+
+  // only the outermost cast defers, so the comments print in source order
+  openStrippedCasts(outer: Node, operand: Node, deferTrailing: boolean): boolean {
+    if (this.comments === "none") return false;
+    let opened = false;
+    for (let cast = outer; cast !== operand; cast = strippedOperand(cast)) {
+      const comments = this.openComments(cast);
+      if (comments === null) continue;
+      this.links.push({
+        node: cast,
+        inner: 0,
+        wrap: false,
+        comments,
+        stripped: true,
+        deferTrailing: deferTrailing && !opened,
+      });
+      opened = true;
+    }
+    return opened;
+  }
+
+  emitStrippedOperand(outer: Node, operand: Node, ctx: number): void {
+    const links = this.links;
+    const base = links.length;
+    const opened = this.openStrippedCasts(outer, operand, (ctx & CTX_DEFER_TRAILING) !== 0);
+    this.emitExpr(operand, opened ? ctx & ~CTX_DEFER_TRAILING : ctx);
+    while (links.length > base) this.closeLink(links.pop()!);
   }
 
   linkHead(node: Node): Node {
@@ -983,7 +1046,7 @@ class Printer extends Output {
         return PREC_POSTFIX | CTX_NO_INSTANTIATION;
       case "TSAsExpression":
       case "TSSatisfiesExpression":
-        return PREC_RELATIONAL | (ctx & CTX_NO_IN);
+        return PREC_RELATIONAL | (ctx & CTX_NO_IN) | CTX_DEFER_TRAILING;
     }
     throw new Error("not a chain link: " + node.type);
   }
@@ -1008,10 +1071,10 @@ class Printer extends Output {
       case "TSInstantiationExpression":
         return this.emit(node.typeArguments);
       case "TSAsExpression":
-        this.writeKeyword(" as");
+        this.writeKeywordThenOwed(" as");
         return this.emit(node.typeAnnotation);
       case "TSSatisfiesExpression":
-        this.writeKeyword(" satisfies");
+        this.writeKeywordThenOwed(" satisfies");
         return this.emit(node.typeAnnotation);
     }
     throw new Error("not a chain link: " + node.type);
@@ -1054,7 +1117,7 @@ class Printer extends Output {
       return;
     }
     this.writeToken(e.optional ? "?." : ".");
-    if (staticKey !== null) this.writeToken(staticKey);
+    if (staticKey !== null) this.writeNodeText(e.property, staticKey);
     else this.emit(e.property);
   }
 
@@ -1106,6 +1169,41 @@ class Printer extends Output {
         this.writeTrailing(c);
       }
     }
+  }
+
+  openComments(node: Node): Comment[] | null {
+    if (this.comments === "none") return null;
+    const list = node.comments;
+    if (list == null || list.length === 0) return null;
+    const savedLead = this.lead;
+    this.emitLeadingComments(node, list);
+    this.lead = savedLead;
+    return list;
+  }
+
+  closeComments(node: Node, list: Comment[] | null, deferTrailing: boolean): void {
+    if (list === null) return;
+    if (deferTrailing || node === this.deferTrailingOf) this.owed = node;
+    else this.emitTrailingComments(list);
+  }
+
+  writeNodeText(node: Node, text: string): void {
+    const list = this.openComments(node);
+    this.writeToken(text);
+    this.closeComments(node, list, false);
+  }
+
+  emitOwedComments(): void {
+    const owed = this.owed;
+    if (owed === null) return;
+    this.owed = null;
+    this.emitTrailingComments(owed.comments!);
+  }
+
+  writeKeywordThenOwed(word: string): void {
+    this.writeToken(word);
+    this.emitOwedComments();
+    if (!this.atLineStart()) this.writeToken(" ");
   }
 
   writeLeading(c: Comment): void {
@@ -1161,8 +1259,14 @@ class Printer extends Output {
     if (head.length > 0) this.writeToken(head);
     for (let i = 1; i < lines.length; i++) {
       this.breakLine();
-      this.writeToken(" ");
       const line = trimStartSpaceTab(trimEndCr(lines[i]!));
+      // a line break alone would collapse a blank line
+      if (line.length === 0 && i + 1 < lines.length) {
+        this.heldSpaces = 0;
+        this.writeComment("\n");
+        continue;
+      }
+      this.writeToken(" ");
       if (line.length > 0) this.writeToken(line);
     }
   }
@@ -1170,7 +1274,7 @@ class Printer extends Output {
   emitProgram(p: T.Program): void {
     if (p.hashbang != null) {
       this.writeToken("#!");
-      if (p.hashbang.value.length > 0) this.writeToken(p.hashbang.value);
+      this.writeLiteral(p.hashbang.value);
       this.writeToken("\n");
     }
     this.printStmtList(p.body, true);
@@ -1188,8 +1292,9 @@ class Printer extends Output {
     const e = d.expression;
     if (e.type === "Literal" && typeof e.value === "string") {
       // an escaped `"use strict"` is not a directive, so the raw lexeme must survive
-      if (typeof e.raw === "string" && e.raw.length >= 2) this.writeToken(e.raw);
-      else this.writeToken(quoteVerbatim(d.directive));
+      const raw = e.raw;
+      const text = typeof raw === "string" && raw.length >= 2 ? raw : quoteVerbatim(d.directive);
+      this.writeNodeText(e, text);
     } else {
       this.emit(e);
     }
@@ -1228,6 +1333,7 @@ class Printer extends Output {
 
   emitReturnStatement(s: T.ReturnStatement): void {
     this.writeToken("return");
+    this.emitInsideCommentsInline(s);
     this.emitRestrictedArg(s.argument, 0);
     this.softSemi();
   }
@@ -1268,12 +1374,13 @@ class Printer extends Output {
     this.writeToken(" (");
   }
 
-  printJump(keyword: string, label: Node | null | undefined): void {
+  printJump(keyword: string, label: Node | null | undefined, host: Node): void {
     if (label != null) {
       this.writeKeyword(keyword);
       this.emit(label);
     } else {
       this.writeToken(keyword);
+      this.emitInsideCommentsInline(host);
     }
     this.softSemi();
   }
@@ -1314,7 +1421,7 @@ class Printer extends Output {
     this.writeSpaced("for (", "for(");
     const init = s.init;
     if (init != null) {
-      if (init.type === "VariableDeclaration") this.printVariableDecl(init, false, true);
+      if (init.type === "VariableDeclaration") this.printForDeclaration(init, true);
       else this.emitExpr(init, CTX_NO_IN);
     }
     this.writeToken(";");
@@ -1359,8 +1466,14 @@ class Printer extends Output {
   }
 
   printForLeft(left: Node): void {
-    if (left.type === "VariableDeclaration") this.printVariableDecl(left, false, false);
+    if (left.type === "VariableDeclaration") this.printForDeclaration(left, false);
     else this.emitAssignTarget(left, 0);
+  }
+
+  printForDeclaration(d: T.VariableDeclaration, noIn: boolean): void {
+    const list = this.openComments(d);
+    this.printVariableDecl(d, false, noIn);
+    this.closeComments(d, list, false);
   }
 
   emitSwitchStatement(s: T.SwitchStatement): void {
@@ -1385,7 +1498,9 @@ class Printer extends Output {
       this.emit(c.test);
       this.writeToken(":");
     } else {
-      this.writeToken("default:");
+      this.writeToken("default");
+      this.emitInsideCommentsInline(c);
+      this.writeToken(":");
     }
     if (c.consequent.length === 0) return;
     this.printIndentedStmtList(c.consequent, false);
@@ -1417,7 +1532,7 @@ class Printer extends Output {
   }
 
   emitVariableDeclaration(d: T.VariableDeclaration): void {
-    if (this.strip && d.declare) return;
+    if (this.strip && isAmbient(d)) return;
     this.printVariableDecl(d, true, false);
   }
 
@@ -1447,7 +1562,7 @@ class Printer extends Output {
   emitItems(items: readonly (Node | null)[], ctx: number): void {
     const depth = this.indentDepth;
     for (let i = 0; i < items.length; i++) {
-      this.emitExpr(items[i], ctx | CTX_ITEM);
+      this.emitExpr(items[i], ctx | CTX_DEFER_TRAILING);
       this.closeItem(i + 1 < items.length, depth);
     }
     this.closeList(depth);
@@ -1455,10 +1570,8 @@ class Printer extends Output {
 
   // an item's separator precedes its trailing comments, so a line comment cannot swallow it
   closeItem(separated: boolean, hangDepth: number): void {
-    const owed = this.owed;
-    this.owed = null;
     if (separated) this.writeToken(",");
-    if (owed !== null) this.emitTrailingComments(owed.comments!);
+    this.emitOwedComments();
     if (!separated) return;
     if (hangDepth >= 0 && this.indentDepth === hangDepth && this.atLineStart()) {
       this.indentDepth = hangDepth + 1;
@@ -1540,11 +1653,12 @@ class Printer extends Output {
     const inTarget = this.inAssignTarget;
     this.inAssignTarget = false;
     this.writeToken("[");
+    this.emitInsideCommentsInline(e);
     const list = e.elements;
     const depth = this.indentDepth;
     for (let i = 0; i < list.length; i++) {
-      if (inTarget) this.emitAssignTarget(list[i], CTX_ITEM);
-      else this.emitExpr(list[i], PREC_ASSIGNMENT | CTX_ITEM);
+      if (inTarget) this.emitAssignTarget(list[i], CTX_DEFER_TRAILING);
+      else this.emitExpr(list[i], PREC_ASSIGNMENT | CTX_DEFER_TRAILING);
       this.closeItem(i + 1 < list.length, depth);
     }
     this.closeList(depth);
@@ -1557,13 +1671,14 @@ class Printer extends Output {
   emitObjectExpression(e: T.ObjectExpression): void {
     const inTarget = this.inAssignTarget;
     this.writeToken("{");
+    this.emitInsideCommentsInline(e);
     const list = e.properties;
     if (list.length > 0) {
       this.space();
       const depth = this.indentDepth;
       for (let i = 0; i < list.length; i++) {
         this.inAssignTarget = inTarget;
-        this.emitExpr(list[i], CTX_ITEM);
+        this.emitExpr(list[i], CTX_DEFER_TRAILING);
         this.closeItem(i + 1 < list.length, depth);
       }
       this.closeList(depth);
@@ -1589,7 +1704,7 @@ class Printer extends Output {
           break;
       }
       this.printObjectKey(p.key, p.computed);
-      this.printFunctionAsMethod(fn);
+      this.emitMethodValue(fn);
       return;
     }
 
@@ -1836,6 +1951,7 @@ class Printer extends Output {
     const definite = this.takeDefinite();
     if (!this.strip && id.decorators != null) this.printDecorators(id.decorators);
     this.writeName(id.name);
+    if (id.optional === true) this.emitInsideCommentsInline(id);
     this.printBindingSuffix(id.optional === true, definite, id.typeAnnotation);
   }
 
@@ -1877,17 +1993,18 @@ class Printer extends Output {
     const definite = this.takeDefinite();
     if (!this.strip && p.decorators != null) this.printDecorators(p.decorators);
     this.writeToken("[");
+    this.emitInsideCommentsInline(p);
     const elements = p.elements;
     const last = elements.length > 0 ? elements[elements.length - 1] : null;
     const rest = last != null && last.type === "RestElement" ? last : null;
     const count = rest === null ? elements.length : elements.length - 1;
     const depth = this.indentDepth;
     for (let i = 0; i < count; i++) {
-      this.emitAssignTarget(elements[i], CTX_ITEM);
+      this.emitAssignTarget(elements[i], CTX_DEFER_TRAILING);
       this.closeItem(i + 1 < count || rest !== null, depth);
     }
     if (rest !== null) {
-      this.emitExpr(rest, CTX_ITEM);
+      this.emitExpr(rest, CTX_DEFER_TRAILING);
       this.closeItem(false, depth);
     }
     this.closeList(depth);
@@ -1903,6 +2020,7 @@ class Printer extends Output {
     const definite = this.takeDefinite();
     if (!this.strip && p.decorators != null) this.printDecorators(p.decorators);
     this.writeToken("{");
+    this.emitInsideCommentsInline(p);
     const props = p.properties;
     const last = props.length > 0 ? props[props.length - 1] : null;
     const rest = last != null && last.type === "RestElement" ? last : null;
@@ -1912,11 +2030,11 @@ class Printer extends Output {
     const depth = this.indentDepth;
     for (let i = 0; i < count; i++) {
       this.bindingProperty = true;
-      this.emitExpr(props[i], CTX_ITEM);
+      this.emitExpr(props[i], CTX_DEFER_TRAILING);
       this.closeItem(i + 1 < count || rest !== null, depth);
     }
     if (rest !== null) {
-      this.emitExpr(rest, CTX_ITEM);
+      this.emitExpr(rest, CTX_DEFER_TRAILING);
       this.closeItem(false, depth);
     }
     this.closeList(depth);
@@ -1941,7 +2059,7 @@ class Printer extends Output {
       const s = simpleStringKey(key);
       if (s !== null) {
         const protoClash = computed && s === "__proto__";
-        if (!protoClash) return this.writeToken(s);
+        if (!protoClash) return this.writeNodeText(key, s);
       }
     }
     this.printPropertyKey(key, computed);
@@ -1952,10 +2070,10 @@ class Printer extends Output {
     if (this.minify) {
       const s = simpleStringKey(key);
       if (s !== null) {
-        if (!computed) return this.writeToken(s);
+        if (!computed) return this.writeNodeText(key, s);
         const ctorClash = s === "constructor" && (isField || !isStatic);
         const protoClash = isStatic && s === "prototype";
-        if (!ctorClash && !protoClash) return this.writeToken(s);
+        if (!ctorClash && !protoClash) return this.writeNodeText(key, s);
       }
     }
     this.printPropertyKey(key, computed);
@@ -1981,9 +2099,15 @@ class Printer extends Output {
     this.printFunctionAsMethod(f);
   }
 
+  emitMethodValue(fn: T.Function): void {
+    const list = this.openComments(fn);
+    this.printFunctionAsMethod(fn);
+    this.closeComments(fn, list, false);
+  }
+
   printFunctionAsMethod(f: T.Function): void {
     this.emit(f.typeParameters);
-    this.printParams(f.params);
+    this.printParams(f.params, f);
     this.emit(f.returnType);
     if (f.body != null) {
       this.space();
@@ -1998,10 +2122,11 @@ class Printer extends Output {
   emitArrowFunctionExpression(a: T.ArrowFunctionExpression, ctx: number): void {
     if (a.async) this.writeKeyword("async");
     this.emitExpr(a.typeParameters, CTX_NO_JSX_TAG);
-    this.printParams(a.params);
-    this.emit(a.returnType);
+    this.printParams(a.params, a);
+    this.emitExpr(a.returnType, CTX_DEFER_TRAILING);
     this.writeSpaced(" =>", "=>");
-    this.space();
+    this.emitOwedComments();
+    if (!this.atLineStart()) this.space();
     if (a.body.type !== "BlockStatement") {
       this.lead = LEAD_ARROW;
       this.emitExpr(a.body, PREC_ASSIGNMENT | (ctx & CTX_NO_IN));
@@ -2012,10 +2137,11 @@ class Printer extends Output {
     }
   }
 
-  printParams(params: readonly Node[]): void {
+  printParams(params: readonly Node[], host: Node): void {
     this.writeToken("(");
     const thisParam = this.strip && params.length > 0 && isNamed(params[0]!, "this");
     this.emitKeptItems(thisParam ? params.slice(1) : params);
+    this.emitInsideCommentsInline(host);
     this.writeToken(")");
   }
 
@@ -2031,15 +2157,15 @@ class Printer extends Output {
         this.emitNothing(node);
         continue;
       }
-      this.emitExpr(node, CTX_ITEM);
+      this.emitExpr(node, CTX_DEFER_TRAILING);
       this.closeItem(i + 1 < end, depth);
     }
     this.closeList(depth);
   }
 
-  emitClass(c: T.Class): void {
+  emitClass(c: T.Class, ctx: number): void {
     if (this.strip && c.declare === true) return;
-    this.printDecorators(c.decorators);
+    if ((ctx & CTX_NO_DECORATORS) === 0) this.printDecorators(c.decorators);
     if (!this.strip) {
       if (c.declare === true) this.writeKeyword("declare");
       if (c.abstract === true) this.writeKeyword("abstract");
@@ -2115,7 +2241,7 @@ class Printer extends Output {
     }
     this.printClassKey(m.key, m.computed, m.static, false);
     if (!this.strip && m.optional === true) this.writeToken("?");
-    this.printFunctionAsMethod(fn);
+    this.emitMethodValue(fn);
     this.skipLeadingOf = null;
   }
 
@@ -2145,11 +2271,14 @@ class Printer extends Output {
       if (p.readonly === true) this.writeKeyword("readonly");
     }
     if (isAccessor) this.writeKeyword("accessor");
+    if (!this.strip && p.definite === true) this.deferTrailingOf = p.key;
     this.printClassKey(p.key, p.computed, p.static, true);
+    this.deferTrailingOf = null;
     if (!this.strip) {
       if (p.optional === true) this.writeToken("?");
       if (p.definite === true) this.writeToken("!");
     }
+    this.emitOwedComments();
     this.emit(p.typeAnnotation);
     if (p.value != null) {
       this.printEq();
@@ -2196,7 +2325,7 @@ class Printer extends Output {
       const depth = this.indentDepth;
       let i = 0;
       if (list[0]!.type === "ImportDefaultSpecifier") {
-        this.emitExpr(list[0], CTX_ITEM);
+        this.emitExpr(list[0], CTX_DEFER_TRAILING);
         this.closeItem(list.length > 1, depth);
         i = 1;
       }
@@ -2223,10 +2352,9 @@ class Printer extends Output {
   }
 
   emitImportSpecifier(s: T.ImportSpecifier): void {
-    if (this.strip && s.importKind === "type") return;
     if (s.importKind === "type") this.writeKeyword("type");
     this.emit(s.imported);
-    if (!sameIdentifier(s.imported, s.local)) {
+    if (!sameIdentifier(s.imported, s.local) || this.hasPrintedComments(s.local)) {
       this.writeKeyword(" as");
       this.emit(s.local);
     }
@@ -2244,13 +2372,16 @@ class Printer extends Output {
     if (this.strip && d.declaration != null && this.stripsToNothing(d.declaration)) {
       return this.emitNothing(d.declaration);
     }
+    const hoisted = decoratorsBeforeExport(d.declaration);
+    if (hoisted !== null) this.printDecorators(hoisted);
     this.writeToken("export");
     if (d.exportKind === "type" && d.declaration == null) this.writeToken(" type");
     if (d.declaration != null) {
       this.writeToken(" ");
-      return this.emit(d.declaration);
+      return this.emitExpr(d.declaration, hoisted !== null ? CTX_NO_DECORATORS : 0);
     }
     this.writeSpaced(" {", "{");
+    this.emitInsideCommentsInline(d);
     if (list.length > 0) {
       this.space();
       this.emitKeptItems(list);
@@ -2270,8 +2401,10 @@ class Printer extends Output {
       if (this.strip && this.stripsToNothing(d.declaration)) {
         return this.emitNothing(d.declaration);
       }
+      const hoisted = decoratorsBeforeExport(d.declaration);
+      if (hoisted !== null) this.printDecorators(hoisted);
       this.writeKeyword("export default");
-      return this.emit(d.declaration);
+      return this.emitExpr(d.declaration, hoisted !== null ? CTX_NO_DECORATORS : 0);
     }
     this.writeKeyword("export default");
     this.lead = LEAD_EXPORT_DEFAULT;
@@ -2295,10 +2428,9 @@ class Printer extends Output {
   }
 
   emitExportSpecifier(s: T.ExportSpecifier): void {
-    if (this.strip && s.exportKind === "type") return;
     if (s.exportKind === "type") this.writeKeyword("type");
     this.emit(s.local);
-    if (!sameIdentifier(s.local, s.exported)) {
+    if (!sameIdentifier(s.local, s.exported) || this.hasPrintedComments(s.exported)) {
       this.writeKeyword(" as");
       this.emit(s.exported);
     }
@@ -2342,13 +2474,13 @@ class Printer extends Output {
     if (value.type === "Literal" && typeof value.value === "string") {
       // jsx attribute strings have no escapes, the raw lexeme is the value
       if (typeof value.raw === "string" && value.raw.length >= 2) {
-        this.writeToken(value.raw);
+        this.writeNodeText(value, value.raw);
       } else if (value.value.includes('"') && value.value.includes("'")) {
         this.writeToken("{");
         this.emit(value);
         this.writeToken("}");
       } else {
-        this.writeToken(quoteVerbatim(value.value));
+        this.writeNodeText(value, quoteVerbatim(value.value));
       }
     } else {
       this.emit(value);
@@ -2393,15 +2525,19 @@ class Printer extends Output {
       case "TSTemplateLiteralType":
         return this.printTemplate(node.quasis, node.types, false);
       case "TSArrayType":
-        this.emitType(node.elementType, TPREC_PRIMARY);
-        return this.writeToken("[]");
-      case "TSIndexedAccessType":
-        this.emitType(node.objectType, TPREC_PRIMARY);
+        this.emitType(node.elementType, TPREC_PRIMARY, CTX_DEFER_TRAILING);
         this.writeToken("[");
+        this.emitOwedComments();
+        return this.writeToken("]");
+      case "TSIndexedAccessType":
+        this.emitType(node.objectType, TPREC_PRIMARY, CTX_DEFER_TRAILING);
+        this.writeToken("[");
+        this.emitOwedComments();
         this.emit(node.indexType);
         return this.writeToken("]");
       case "TSTupleType":
         this.writeToken("[");
+        this.emitInsideCommentsInline(node);
         this.emitList(node.elementTypes);
         return this.writeToken("]");
       case "TSNamedTupleMember":
@@ -2411,7 +2547,7 @@ class Printer extends Output {
         this.space();
         return this.emit(node.elementType);
       case "TSOptionalType":
-        this.emitType(node.typeAnnotation, TPREC_PRIMARY);
+        this.emitType(node.typeAnnotation, TPREC_PRIMARY, 0);
         return this.writeToken("?");
       case "TSRestType":
         this.writeToken("...");
@@ -2425,9 +2561,9 @@ class Printer extends Output {
       case "TSIntersectionType":
         return this.emitTypeList(node.types, "&");
       case "TSConditionalType":
-        this.emitType(node.checkType, TPREC_UNION);
-        this.writeKeyword(" extends");
-        this.emitType(node.extendsType, TPREC_UNION);
+        this.emitType(node.checkType, TPREC_UNION, CTX_DEFER_TRAILING);
+        this.writeKeywordThenOwed(" extends");
+        this.emitType(node.extendsType, TPREC_UNION, 0);
         this.writeSpaced(" ?", "?");
         this.space();
         this.emit(node.trueType);
@@ -2439,27 +2575,25 @@ class Printer extends Output {
         return this.emit(node.typeParameter);
       case "TSTypeOperator":
         this.writeKeyword(node.operator);
-        return this.emitType(node.typeAnnotation, TPREC_OPERATOR);
+        return this.emitType(node.typeAnnotation, TPREC_OPERATOR, 0);
       case "TSParenthesizedType":
         this.writeToken("(");
         this.emit(node.typeAnnotation);
         return this.writeToken(")");
       case "TSFunctionType":
-        return this.printArrowType(node.typeParameters, node.params, node.returnType);
+        return this.printArrowType(node);
       case "TSConstructorType":
         if (node.abstract) this.writeKeyword("abstract");
         this.writeKeyword("new");
-        return this.printArrowType(node.typeParameters, node.params, node.returnType);
+        return this.printArrowType(node);
       case "TSTypePredicate":
         if (node.asserts) this.writeKeyword("asserts");
-        this.emit(node.parameterName);
-        if (node.typeAnnotation != null) {
-          this.writeKeyword(" is");
-          this.emitUnwrappedType(node.typeAnnotation);
-        }
-        return;
+        if (node.typeAnnotation == null) return this.emit(node.parameterName);
+        this.emitExpr(node.parameterName, CTX_DEFER_TRAILING);
+        this.writeKeywordThenOwed(" is");
+        return this.emitUnwrappedType(node.typeAnnotation);
       case "TSTypeLiteral":
-        return this.printSignatureBody(node.members);
+        return this.printSignatureBody(node.members, node);
       case "TSMappedType":
         return this.emitTSMappedType(node);
       case "TSPropertySignature":
@@ -2473,12 +2607,12 @@ class Printer extends Output {
         else if (node.kind === "set") this.writeKeyword("set");
         this.printPropertyKey(node.key, node.computed);
         if (node.optional) this.writeToken("?");
-        return this.printSignatureTail(node.typeParameters, node.params, node.returnType);
+        return this.printSignatureTail(node);
       case "TSCallSignatureDeclaration":
-        return this.printSignatureTail(node.typeParameters, node.params, node.returnType);
+        return this.printSignatureTail(node);
       case "TSConstructSignatureDeclaration":
         this.writeKeyword("new");
-        return this.printSignatureTail(node.typeParameters, node.params, node.returnType);
+        return this.printSignatureTail(node);
       case "TSIndexSignature":
         if (node.static === true) this.writeKeyword("static");
         if (node.readonly) this.writeKeyword("readonly");
@@ -2494,7 +2628,7 @@ class Printer extends Output {
         this.emit(node.typeParameters);
         this.printEq();
         // a leftmost bare `intrinsic` reference would reparse as the keyword
-        this.wrapIf(isLeftmostIntrinsicReference(node.typeAnnotation), node.typeAnnotation);
+        this.wrapIf(isLeftmostIntrinsicReference(node.typeAnnotation), node.typeAnnotation, 0);
         return this.softSemi();
       case "TSInterfaceDeclaration":
         if (node.declare) this.writeKeyword("declare");
@@ -2508,7 +2642,7 @@ class Printer extends Output {
         this.space();
         return this.emit(node.body);
       case "TSInterfaceBody":
-        return this.printSignatureBody(node.body);
+        return this.printSignatureBody(node.body, node);
       case "TSInterfaceHeritage":
       case "TSClassImplements":
         this.emit(node.expression);
@@ -2632,8 +2766,8 @@ class Printer extends Output {
     this.writeToken(">");
   }
 
-  emitType(node: Node, floor: number): void {
-    this.wrapIf(typePrec(node) < floor, node);
+  emitType(node: Node, floor: number, ctx: number): void {
+    this.wrapIf(typePrec(node) < floor, node, ctx);
   }
 
   // a lone member keeps its leading operator (`type X = | A`) so reparse keeps the wrapper
@@ -2649,7 +2783,7 @@ class Printer extends Output {
         this.writeToken(op);
         this.space();
       }
-      this.emitType(types[i]!, floor);
+      this.emitType(types[i]!, floor, 0);
     }
   }
 
@@ -2659,22 +2793,20 @@ class Printer extends Output {
     if (postfix) this.writeToken(marker);
   }
 
-  printArrowType(
-    typeParameters: Node | null | undefined,
-    params: readonly Node[],
-    returnType: Node | null | undefined,
-  ): void {
-    this.emit(typeParameters);
-    this.printParams(params);
+  printArrowType(t: T.TSFunctionType | T.TSConstructorType): void {
+    this.emit(t.typeParameters);
+    this.printParams(t.params, t);
     this.writeSpaced(" =>", "=>");
     this.space();
-    this.emitUnwrappedType(returnType);
+    this.emitUnwrappedType(t.returnType);
   }
 
   emitUnwrappedType(node: Node | null | undefined): void {
     if (node == null) return;
-    if (node.type === "TSTypeAnnotation") this.emit(node.typeAnnotation);
-    else this.emit(node);
+    if (node.type !== "TSTypeAnnotation") return this.emit(node);
+    const list = this.openComments(node);
+    this.emit(node.typeAnnotation);
+    this.closeComments(node, list, false);
   }
 
   emitTSMappedType(t: T.TSMappedType): void {
@@ -2724,17 +2856,15 @@ class Printer extends Output {
   }
 
   printSignatureTail(
-    typeParameters: Node | null | undefined,
-    params: readonly Node[],
-    returnType: Node | null | undefined,
+    s: T.TSMethodSignature | T.TSCallSignatureDeclaration | T.TSConstructSignatureDeclaration,
   ): void {
-    this.emit(typeParameters);
-    this.printParams(params);
-    this.emit(returnType);
+    this.emit(s.typeParameters);
+    this.printParams(s.params, s);
+    this.emit(s.returnType);
     this.softSemi();
   }
 
-  printSignatureBody(items: readonly Node[]): void {
+  printSignatureBody(items: readonly Node[], host: Node): void {
     this.writeToken("{");
     if (items.length > 0) {
       this.indentDepth++;
@@ -2746,13 +2876,15 @@ class Printer extends Output {
       this.indentDepth--;
       this.pendingSemi = false;
       this.newline();
+    } else if (this.comments !== "none") {
+      this.emitInsideComments(host);
     }
     this.writeToken("}");
   }
 
-  wrapIf(cond: boolean, node: Node): void {
+  wrapIf(cond: boolean, node: Node, ctx: number): void {
     if (cond) this.writeToken("(");
-    this.emit(node);
+    this.emitExpr(node, ctx);
     if (cond) this.writeToken(")");
   }
 
@@ -2763,11 +2895,13 @@ class Printer extends Output {
       this.indentDepth++;
       for (let i = 0; i < list.length; i++) {
         this.newline();
-        this.emitExpr(list[i], CTX_ITEM);
+        this.emitExpr(list[i], CTX_DEFER_TRAILING);
         this.closeItem(i + 1 < list.length, -1);
       }
       this.indentDepth--;
       this.newline();
+    } else if (this.comments !== "none") {
+      this.emitInsideComments(b);
     }
     this.writeToken("}");
   }
@@ -2777,6 +2911,40 @@ function trimEndCr(line: string): string {
   let end = line.length;
   while (end > 0 && line.charCodeAt(end - 1) === CHAR_CR) end--;
   return end === line.length ? line : line.slice(0, end);
+}
+
+function needsSpaceBeforeInlineComment(last: number): boolean {
+  switch (last) {
+    case 0:
+    case CHAR_SPACE:
+    case CHAR_LF:
+    case CHAR_OPEN_PAREN:
+    case CHAR_OPEN_BRACKET:
+    case CHAR_OPEN_BRACE:
+    case CHAR_LT:
+      return false;
+  }
+  return true;
+}
+
+// an uninitialized `const` is ambient, as in a `.d.ts`
+function isAmbient(d: T.VariableDeclaration): boolean {
+  if (d.declare === true) return true;
+  return d.kind === "const" && d.declarations.some((x) => x.init == null);
+}
+
+function strippedOperand(node: Node): Node {
+  switch (node.type) {
+    case "TSAsExpression":
+    case "TSSatisfiesExpression":
+    case "TSNonNullExpression":
+    case "TSInstantiationExpression":
+    case "TSTypeAssertion":
+      return node.expression;
+    case "TSParameterProperty":
+      return node.parameter;
+  }
+  throw new Error("not a stripped wrapper: " + node.type);
 }
 
 function hasComments(node: Node): boolean {
@@ -2837,6 +3005,16 @@ function isDeclaration(node: Node): boolean {
       return true;
   }
   return false;
+}
+
+function decoratorsBeforeExport(declaration: Node | null | undefined): readonly Node[] | null {
+  if (declaration == null) return null;
+  if (declaration.type !== "ClassDeclaration" && declaration.type !== "ClassExpression") {
+    return null;
+  }
+  const decorators = declaration.decorators;
+  if (decorators == null || decorators.length === 0) return null;
+  return decorators[0]!.start < declaration.start ? decorators : null;
 }
 
 function isNamed(node: Node, name: string): boolean {

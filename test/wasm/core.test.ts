@@ -5,12 +5,11 @@ import { analyze } from "yuku-analyzer";
 import { fileOptions, load } from "yuku-core";
 import { parse } from "yuku-parser";
 import { load as loadInBrowser } from "../../npm/yuku-core/browser.js";
-import { corpusFiles, corpusPresent } from "../corpus";
+import { corpusFiles, corpusPresent, projectFiles } from "../corpus";
 import { jsSource, tsSource } from "./sources";
 
 const native = load();
 const wasm = await wasmCore.load();
-const encoder = new TextEncoder();
 const bytes = readFileSync(new URL("../../npm/yuku-core-wasm/yuku-core.wasm", import.meta.url));
 
 const OPTION_SETS = [
@@ -20,12 +19,11 @@ const OPTION_SETS = [
 ] as const;
 
 function differences(source: string, options: object): string[] {
-  const input = encoder.encode(source);
   const resolved = fileOptions(options);
   const found: string[] = [];
   for (const entry of ["parse", "analyze"] as const) {
-    const expected = Buffer.from(native[entry](input, resolved));
-    if (!expected.equals(Buffer.from(wasm[entry](input, resolved)))) found.push(entry);
+    const expected = Buffer.from(native[entry](source, resolved));
+    if (!expected.equals(Buffer.from(wasm[entry](source, resolved)))) found.push(entry);
   }
   return found;
 }
@@ -38,11 +36,16 @@ describe("the WebAssembly core matches the native core", () => {
     }
   });
 
+  test("on strings of every UTF-16 sequence, lone surrogates read as U+FFFD", () => {
+    const text = `é € 😀 \ud800 \udc00 ${"ascii past a chunk ".repeat(4)}😀`;
+    expect(differences(`let s = "${text}";\nlet x = ;`, { lang: "ts" })).toEqual([]);
+  });
+
   test.skipIf(!corpusPresent())(
-    "on every corpus file",
+    "on every corpus and project file",
     () => {
       const mismatched: string[] = [];
-      for (const file of corpusFiles()) {
+      for (const file of [...corpusFiles(), ...projectFiles()]) {
         const options = {
           lang: file.lang,
           sourceType: file.sourceType,
@@ -58,11 +61,9 @@ describe("the WebAssembly core matches the native core", () => {
   );
 });
 
-// every source `load` and `loadSync` take yields a core that parses alike
 describe("loading the WebAssembly core", () => {
-  const input = encoder.encode(tsSource);
   const options = fileOptions({ lang: "ts" });
-  const expected = Buffer.from(native.parse(input, options));
+  const expected = Buffer.from(native.parse(tsSource, options));
 
   test("from every source", async () => {
     const response = (type: string) =>
@@ -75,7 +76,7 @@ describe("loading the WebAssembly core", () => {
       wasmCore.loadSync(bytes),
       wasmCore.loadSync(new WebAssembly.Module(bytes)),
     ];
-    for (const core of cores) expect(Buffer.from(core.parse(input, options))).toEqual(expected);
+    for (const core of cores) expect(Buffer.from(core.parse(tsSource, options))).toEqual(expected);
   });
 
   test("fails on a failed response", async () => {

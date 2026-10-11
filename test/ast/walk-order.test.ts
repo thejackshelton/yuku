@@ -2,13 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { Node } from "yuku-parser";
 import { parse } from "yuku-parser";
 import { walk } from "yuku-ast";
-import { corpusFiles, corpusPresent } from "../corpus";
+import { corpusFiles, corpusPresent, projectFiles } from "../corpus";
 
-// quasis and expressions interleave in source, but walk order is by
-// key, matching every ESTree walker
+// walkers visit by key, so template quasis and expressions leave source order
 const INTERLEAVED_TYPES = new Set(["TemplateLiteral", "TSTemplateLiteralType"]);
 
-/** The first child entered out of source order, if any. */
 function walkOrderViolation(program: Node): string | null {
   let violation: string | null = null;
   const lastStart = new Map<Node, number>();
@@ -38,10 +36,10 @@ describe("walk order", () => {
     expect(walkOrderViolation(program)).toBeNull();
   });
 
-  test.skipIf(!corpusPresent())("holds across the parser corpus", async () => {
+  test.skipIf(!corpusPresent())("holds across the corpus and projects", async () => {
     const violations: string[] = [];
     let checked = 0;
-    for (const file of corpusFiles()) {
+    for (const file of [...corpusFiles(), ...projectFiles()]) {
       const source = await Bun.file(file.path).text();
       const { program, diagnostics } = parse(source, {
         sourceType: file.sourceType,

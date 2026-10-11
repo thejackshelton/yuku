@@ -14,10 +14,7 @@ import { deserializeAstJson, formatDiagnostics, serializeAstJson } from "../ast-
 
 interface TestSuite {
   path: string;
-  /**
-   * `pass` files parse cleanly and match their snapshot when one exists. `fail` files report an
-   * error. `snapshot` files may report errors, and a missing snapshot is written on first run.
-   */
+  // `snapshot` files may report errors, and a missing snapshot is written on first run
   expect: "pass" | "fail" | "snapshot";
   lang: SourceLang[];
   recursive?: boolean;
@@ -112,6 +109,12 @@ const suites: TestSuite[] = [
     path: `${MISC_DIR}/js/preserve-parens-disabled`,
     expect: "snapshot",
     lang: ["js"],
+    options: { preserveParens: false },
+  },
+  {
+    path: `${MISC_DIR}/ts/preserve-parens-disabled`,
+    expect: "snapshot",
+    lang: ["ts"],
     options: { preserveParens: false },
   },
   {

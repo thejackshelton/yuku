@@ -215,7 +215,7 @@ pub const Parser = struct {
         try self.tokens.append(self.allocator(), self.current_token);
     }
 
-    const BodyKind = enum {
+    pub const BodyKind = enum {
         program,
         function,
         module_block,
@@ -232,7 +232,7 @@ pub const Parser = struct {
         defer self.scratch_statements.reset(statements_checkpoint);
 
         while (!self.isAtBodyEnd(terminator)) {
-            if (try statements.parseStatement(self, .{})) |statement| {
+            if (try statements.parseStatement(self, .{ .body = kind })) |statement| {
                 try self.scratch_statements.append(self.allocator(), statement);
             } else {
                 try self.recover(terminator);
@@ -261,7 +261,15 @@ pub const Parser = struct {
         if (!token.isEscaped()) {
             return self.tree.sourceSlice(token.span.start + 1, token.span.end - 1);
         }
-        return self.decodeEscapedString(token.span.start + 1, token.span.end - 1);
+        return self.decode(util.Utf.decodeStringEscapes, token.span.start + 1, token.span.end - 1);
+    }
+
+    /// Returns JSX text or the inside of a JSX attribute string with its entities decoded.
+    pub inline fn jsxValue(self: *Parser, start: u32, end: u32) Error!ast.String {
+        if (std.mem.findScalar(u8, self.source[start..end], '&') == null) {
+            return self.tree.sourceSlice(start, end);
+        }
+        return self.decode(util.Utf.decodeJsxEntities, start, end);
     }
 
     /// Returns the decoded content of a template quasi span.
@@ -273,7 +281,7 @@ pub const Parser = struct {
         if (!token.isEscaped()) {
             return self.tree.sourceSlice(span.start, span.end);
         }
-        return self.decodeEscapedString(span.start, span.end);
+        return self.decode(util.Utf.decodeStringEscapes, span.start, span.end);
     }
 
     fn decodeEscapedIdentifier(self: *Parser, start: u32, end: u32) Error!ast.String {
@@ -284,12 +292,12 @@ pub const Parser = struct {
         );
     }
 
-    fn decodeEscapedString(self: *Parser, start: u32, end: u32) Error!ast.String {
+    fn decode(self: *Parser, comptime decoder: anytype, start: u32, end: u32) Error!ast.String {
         @branchHint(.cold);
         const alloc = self.allocator();
         var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(alloc);
-        try util.Utf.decodeStringEscapes(self.source[start..end], &buf, alloc);
+        try decoder(self.source[start..end], &buf, alloc);
         return try self.tree.addString(buf.items);
     }
 
@@ -556,15 +564,15 @@ pub const Parser = struct {
         const spans = tree.nodes.items(.span);
         for (0..datas.len) |i| {
             var inner: u32 = switch (datas[i]) {
-                .parenthesized_expression => |p| @intFromEnum(p.expression),
-                .ts_parenthesized_type => |p| @intFromEnum(p.type_annotation),
+                .parenthesized_expression => |p| @backingInt(p.expression),
+                .ts_parenthesized_type => |p| @backingInt(p.type_annotation),
                 else => continue,
             };
 
             while (true) {
                 switch (datas[inner]) {
-                    .parenthesized_expression => |p| inner = @intFromEnum(p.expression),
-                    .ts_parenthesized_type => |p| inner = @intFromEnum(p.type_annotation),
+                    .parenthesized_expression => |p| inner = @backingInt(p.expression),
+                    .ts_parenthesized_type => |p| inner = @backingInt(p.type_annotation),
                     else => break,
                 }
             }
@@ -617,7 +625,7 @@ pub const Parser = struct {
     }
 
     pub fn fmt(self: *Parser, comptime format: []const u8, args: anytype) Error![]u8 {
-        return try std.fmt.allocPrint(self.allocator(), format, args);
+        return self.allocator().print(format, args);
     }
 
     pub fn recover(self: *Parser, terminator: ?TokenTag) Error!void {

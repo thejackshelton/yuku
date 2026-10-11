@@ -16,7 +16,6 @@ function analyzeOne(source: string, options: AnalyzeOptions): Module {
   return analyze(source, { path: "input.ts", ...options });
 }
 
-/** Analyzes one file and renders its full semantic model as canonical text. */
 export function summary(source: string, options: AnalyzeOptions = {}): string {
   const module = analyzeOne(source, options);
   const lines: string[] = [];
@@ -136,6 +135,7 @@ function importRow(record: Import): string {
   const mods = (record.typeOnly ? " type" : "") + (record.phase ? ` phase:${record.phase}` : "");
   const specifier = `from "${record.specifier}"`;
   if (record.kind === "sideEffect") return `(side-effect) ${specifier}${mods}`;
+  if (record.kind === "augmentation") return `(augmentation) ${specifier}${mods}`;
   const local = record.local ? `#${record.local.id}` : "–";
   if (record.isNamespace) return `* as ${local} ${specifier}${mods}`;
   return `${record.name} → ${local} ${specifier}${mods}`;
@@ -185,7 +185,6 @@ const FUNCTION_TYPES = [
   "ArrowFunctionExpression",
 ] as const;
 
-/** Dumps the free variables of every function in the file, in source order. */
 export function captures(source: string, options: AnalyzeOptions = {}): string {
   const module = analyzeOne(source, options);
   const lines: string[] = [];
@@ -205,17 +204,12 @@ function functionLabel(node: Node): string {
   return "function <anonymous>";
 }
 
-/** Builds a multi-file analyzer from a path→source map (no auto-link). */
 export function project(files: Record<string, string>): Analyzer {
   const analyzer = new Analyzer();
   for (const [path, source] of Object.entries(files)) analyzer.setFile(path, source);
   return analyzer;
 }
 
-/**
- * Renders link diagnostics, dependency edges, and each module's exported names with `export *`
- * chains followed.
- */
 export function links(files: Record<string, string>): string {
   const analyzer = project(files);
   analyzer.link();
@@ -244,14 +238,14 @@ function bindingOf(analyzer: Analyzer, path: string, name: string): Binding {
   return binding;
 }
 
-/** Formats `definition()` for the binding named `name` in module `path`. */
 export function definition(analyzer: Analyzer, path: string, name: string): string {
   const def = bindingOf(analyzer, path, name).definition();
   if (def === null) return "(none)";
-  return `${def.module.path}:${def.binding ? def.binding.name : "(namespace)"}`;
+  const defined = `${def.module.path}:${def.binding ? def.binding.name : "(namespace)"}`;
+  const augmented = def.augmentations.map((binding) => `${binding.module.path}:${binding.name}`);
+  return [defined, ...augmented].join(" + ");
 }
 
-/** Formats `findReferences()` for the binding named `name` in module `path`. */
 export function references(analyzer: Analyzer, path: string, name: string): string {
   return bindingOf(analyzer, path, name)
     .findReferences()

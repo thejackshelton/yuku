@@ -19,6 +19,7 @@ const ERASED_WRAPPERS = new Set([
 ]);
 
 interface Resolution {
+  name: string;
   def: number;
   write: boolean;
 }
@@ -26,7 +27,7 @@ interface Resolution {
 function scopeManager(source: string, sourceType: SourceType, lang: SourceLang) {
   const jsx = lang === "jsx" || lang === "tsx";
   const tree = tsParse(source, { range: true, sourceType, jsx, allowInvalidAST: false });
-  const manager = analyze(tree, { sourceType });
+  const manager = analyze(tree, { sourceType, lib: [] });
   const references = new Map<number, Resolution>();
   const declarations = new Map<number, string[]>();
   for (const scope of manager.scopes) {
@@ -36,6 +37,7 @@ function scopeManager(source: string, sourceType: SourceType, lang: SourceLang) 
         .filter((start): start is number => start !== undefined);
       // no named def means an implicit binding such as arguments
       references.set(reference.identifier.range[0], {
+        name: reference.identifier.name,
         def: starts.length === 0 ? UNRESOLVED : Math.min(...starts),
         write: reference.isWrite(),
       });
@@ -101,6 +103,14 @@ function isUnmodeled(module: Module, node: Node): boolean {
   return parent?.type === "TSModuleDeclaration" && parent.id.type === "TSQualifiedName";
 }
 
+function isIntrinsicTag(module: Module, position: number): boolean {
+  const node = module.nodeAt(position);
+  if (node?.type !== "JSXIdentifier") return false;
+  const parent = module.parentOf(node);
+  if (parent?.type === "JSXNamespacedName") return true;
+  return parent?.type !== "JSXMemberExpression" && /^[a-z]|-/.test(node.name);
+}
+
 function unmodeled(module: Module, binding: Binding): boolean {
   return binding.declarations.some((node) => isUnmodeled(module, node));
 }
@@ -130,13 +140,24 @@ function compare(source: string, sourceType: SourceType, lang: SourceLang): Comp
     if (def !== their.def) {
       const node = their.def === UNRESOLVED ? null : module.nodeAt(their.def);
       const target = node === null ? null : module.bindingOf(node);
-      if (target !== null && !target.visibleIn(reference.space)) continue;
+      const consistent = binding === null || binding.visibleIn(reference.space);
+      if (consistent && target !== null && !target.visibleIn(reference.space)) continue;
       mismatches.push(`${reference.name}@${position}: yuku ${def}, scope-manager ${their.def}`);
     } else if (reference.isWrite !== their.write) {
       const parent = module.parentOf(reference.node);
       if (reference.isWrite && parent !== null && ERASED_WRAPPERS.has(parent.type)) continue;
       mismatches.push(`${reference.name}@${position}: yuku write ${reference.isWrite}`);
     }
+  }
+
+  const recorded = new Set([
+    ...module.references.map((reference) => reference.node.start),
+    ...module.bindings.flatMap((binding) => binding.declarations.map((node) => node.start)),
+  ]);
+  for (const [position, their] of theirs.references) {
+    if (isIntrinsicTag(module, position)) continue;
+    compared++;
+    if (!recorded.has(position)) mismatches.push(`${their.name}@${position}: no yuku reference`);
   }
 
   const ours = new Map<number, string | null>();
@@ -167,18 +188,29 @@ function compareFile(file: CorpusFile, source: string): Comparison | null {
 const SUITE = "test/parser/suite/ts/pass";
 
 const KNOWN: Known = {
-  "scope-manager resolves an import equals alias or type-only export specifier to nothing": [
-    `${SUITE}/3a66bcb0ff2adb2c.module.ts`,
-    `${SUITE}/63bd218519f23e2b.module.ts`,
-    `${SUITE}/9c854a266a3d8cc0.module.ts`,
-  ],
-  "scope-manager merges a parameter with a same-named body var": [`${SUITE}/f2131ad89bc9a8ba.ts`],
-  "scope-manager scopes a declaration in statement position apart from tsc": [
-    `${SUITE}/4d85c34e00391b61.ts`,
-  ],
-  "a var and a function share a name in one catch block, which ECMAScript rejects": [
-    `${SUITE}/a81cfbc1c9405b6b.ts`,
-  ],
+  "scope-manager resolves an import equals alias to nothing": {
+    [`${SUITE}/3a66bcb0ff2adb2c.module.ts`]: ["x@268: yuku 175, scope-manager -1"],
+  },
+  "scope-manager merges a parameter with a same-named body var": {
+    [`${SUITE}/f2131ad89bc9a8ba.ts`]: [
+      "s@4207: yuku 4193, scope-manager 4172",
+      "s@4476: yuku 4462, scope-manager 4441",
+      "s@4762: yuku 4734, scope-manager 4710",
+      "t@1282: yuku 1219, scope-manager 1194",
+      "t@3315: yuku 3238, scope-manager 3213",
+    ],
+  },
+  "scope-manager scopes a declaration in statement position apart from tsc": {
+    [`${SUITE}/4d85c34e00391b61.ts`]: [
+      "declaration@196: yuku scope 170, scope-manager global",
+      "declaration@365: yuku scope global, scope-manager 335",
+    ],
+  },
+  "typescript-estree reads `<!--` in a script as operators, not an HTML-like comment": {
+    "test/parser/suite/js/pass/158dc2b44b1958390.js": ["bar@8: no yuku reference"],
+    "test/parser/suite/js/pass/367c3d5dca7f95a5.js": ["b@5: no yuku reference"],
+    "test/parser/suite/js/pass/9361ed8ad34bb5b9.js": ["bar@8: no yuku reference"],
+  },
 };
 
 type Snippet = [name: string, source: string, sourceType?: SourceType, lang?: SourceLang];

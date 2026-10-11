@@ -10,9 +10,13 @@ import { SAMPLE_MAX } from "./utils/differential";
 
 const UNRESOLVED = "unresolved";
 
+interface Checker extends ts.TypeChecker {
+  getMergedSymbol(symbol: ts.Symbol): ts.Symbol;
+}
+
 interface Linked {
   program: ts.Program;
-  checker: ts.TypeChecker;
+  checker: Checker;
   analyzer: Analyzer;
   /** The project file tsc resolves a specifier to, or null. */
   resolveModule(specifier: string, importer: string): string | null;
@@ -60,15 +64,17 @@ function link(loaded: LoadedProject): Linked {
   });
   for (const file of files) analyzer.setFile(file, ts.sys.readFile(file) ?? "");
   const shown = (path: string) => relative(root, path).replaceAll("\\", "/");
-  return { program, checker: program.getTypeChecker(), analyzer, resolveModule, shown };
+  const checker = program.getTypeChecker() as Checker;
+  return { program, checker, analyzer, resolveModule, shown };
 }
 
 // `path:start` per declaration, or `module:path`
 function placesOf(linked: Linked, definition: Definition | null): string[] {
   if (definition === null) return [UNRESOLVED];
-  const path = linked.shown(definition.module.path);
-  if (definition.binding === null) return [`module:${path}`];
-  return definition.binding.declarations.map((node) => `${path}:${node.start}`);
+  if (definition.binding === null) return [`module:${linked.shown(definition.module.path)}`];
+  return [definition.binding, ...definition.augmentations].flatMap((binding) =>
+    binding.declarations.map((node) => `${linked.shown(binding.module.path)}:${node.start}`),
+  );
 }
 
 function isJSDoc(declaration: ts.Node): boolean {
@@ -83,10 +89,14 @@ function declaresInSyntax(symbol: ts.Symbol): boolean {
 function tscPlacesOf(linked: Linked, symbol: ts.Symbol | undefined): string[] | null {
   if (symbol === undefined) return [UNRESOLVED];
   const isAlias = (symbol.flags & ts.SymbolFlags.Alias) !== 0;
-  const target = isAlias ? linked.checker.getAliasedSymbol(symbol) : symbol;
+  const target = linked.checker.getMergedSymbol(
+    isAlias ? linked.checker.getAliasedSymbol(symbol) : symbol,
+  );
   if (target.declarations?.some(isJSDoc)) return null;
   const places: string[] = [];
   for (const declaration of target.declarations ?? []) {
+    // `X.y = …` declares `X` to tsc
+    if (ts.isIdentifier(declaration)) continue;
     const file = declaration.getSourceFile();
     const path = linked.shown(absolute(file.fileName));
     if (ts.isSourceFile(declaration)) {
@@ -110,8 +120,10 @@ function identifierAt(file: ts.SourceFile, position: number): ts.Identifier | un
 }
 
 function exportsByAssignment(module: Module): boolean {
-  if (module.moduleFlags.usesModule || module.moduleFlags.usesExports) return true;
-  return module.exports.some((record) => record.kind === "equals");
+  if (module.exports.some((record) => record.kind === "equals")) return true;
+  if (!module.moduleFlags.usesModule && !module.moduleFlags.usesExports) return false;
+  if (module.exports.length > 0) return false;
+  return module.imports.every((record) => record.kind === "dynamic" || record.kind === "require");
 }
 
 function compareLinks(linked: Linked, module: Module, mismatches: string[]): number {
@@ -121,7 +133,7 @@ function compareLinks(linked: Linked, module: Module, mismatches: string[]): num
   const check = (subject: string, ours: string[], theirs: string[] | null) => {
     if (theirs === null) return;
     compared++;
-    if (ours.some((place) => theirs.includes(place))) return;
+    if ([...ours].sort().join() === [...theirs].sort().join()) return;
     mismatches.push(`${shown} ${subject}: yuku ${ours}, tsc ${theirs}`);
   };
 
@@ -152,6 +164,7 @@ function compareLinks(linked: Linked, module: Module, mismatches: string[]): num
 
   for (const record of module.exports) {
     if (record.kind !== "reExport" || record.name === null) continue;
+    if (record.resolvedModule === null) continue;
     const exported = exports.find((candidate) => candidate.name === record.name);
     const ours = placesOf(linked, module.resolveExport(record.name));
     check(`re-export ${record.name}`, ours, tscPlacesOf(linked, exported));
@@ -201,7 +214,8 @@ describe("linking agrees with tsc across each project", () => {
         const files = loaded.files.length;
         console.log(`${loaded.project.name}: ${compared} links agreed across ${files} files`);
         expect(mismatches.slice(0, SAMPLE_MAX)).toEqual([]);
-        expect(compared).toBeGreaterThan(files);
+        // CommonJS links through `module.exports`, which neither side compares
+        expect(compared).toBeGreaterThan(loaded.project.type === "commonjs" ? 0 : files);
       },
       600_000,
     );

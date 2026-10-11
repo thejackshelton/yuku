@@ -1,6 +1,4 @@
-// Prints every corpus file, the deep chains, and the instantiation expressions with the Zig and
-// the JS printer and compares code, mappings, and diagnostics byte for byte.
-//
+// the Zig and JS printers must agree byte for byte
 //   bun test/codegen/conformance.ts [plan...] [--file <path>] [--show <n>]
 
 import { spawnSync } from "node:child_process";
@@ -9,8 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse, sourceTypeFromPath, type ParseOptions } from "yuku-parser";
 import { generate, type GenerateOptions } from "yuku-codegen";
-import { corpusFiles, type CorpusFile } from "../corpus";
-import { deepChains, INSTANTIATIONS } from "./helpers";
+import { corpusFiles, projectFiles, type CorpusFile } from "../corpus";
+import { commentPlacements, deepChains, INSTANTIATIONS } from "./helpers";
 
 const REFERENCE = join(
   "zig-out",
@@ -20,9 +18,7 @@ const REFERENCE = join(
 
 export interface Plan {
   name: string;
-  /** Flags for `codegen-reference`. */
   zig: string[];
-  /** The same options for `generate`, `sourceMap` added per file when `map` is set. */
   js: GenerateOptions;
   preserveParens: boolean;
   map: boolean;
@@ -131,12 +127,10 @@ interface Reference {
   diagnostics: { start: number; end: number; message: string }[];
 }
 
-/** A file to print, read from `path` unless `source` is given. */
 export interface Input extends CorpusFile {
   source?: string;
 }
 
-/** Every corpus file, the deep chains, and the instantiation expressions. */
 export function conformanceInputs(): Input[] {
   const chains = deepChains().map(({ source, lang }, i) => {
     const path = `chain-${i}.${lang}`;
@@ -149,10 +143,13 @@ export function conformanceInputs(): Input[] {
     sourceType: "module",
     source: INSTANTIATIONS.join("\n"),
   };
-  return [...corpusFiles(), ...chains, instantiations];
+  const comments = commentPlacements().map(({ source, lang }, i) => {
+    const path = `comment-${i}.${lang}`;
+    return { path, relative: path, lang, sourceType: "module" as const, source };
+  });
+  return [...corpusFiles(), ...projectFiles(), ...chains, instantiations, ...comments];
 }
 
-/** Prints `files` with both printers under `plan`. */
 export function runPlan(plan: Plan, files: Input[]): PlanResult {
   const references = runReference(plan, files);
   const mismatches: Mismatch[] = [];
@@ -227,15 +224,15 @@ function runReference(plan: Plan, files: Input[]): Reference[] {
   }
   const dir = mkdtempSync(join(tmpdir(), "codegen-conformance-"));
   try {
-    const paths = files.map((file) => {
-      if (file.source === undefined) return file.path;
+    const lines = files.map((file) => {
+      if (file.source === undefined) return `${file.sourceType} ${file.path}`;
       const path = join(dir, file.path);
       writeFileSync(path, file.source);
-      return path;
+      return `${file.sourceType} ${path}`;
     });
     const list = join(dir, "list.txt");
     const out = join(dir, "out.bin");
-    writeFileSync(list, paths.join("\n") + "\n");
+    writeFileSync(list, lines.join("\n") + "\n");
     const run = spawnSync(REFERENCE, [list, out, ...plan.zig], { stdio: "inherit" });
     if (run.status !== 0) throw new Error(`codegen-reference failed for plan ${plan.name}`);
     return readReference(readFileSync(out), files.length);
@@ -305,7 +302,6 @@ function firstDifference(a: string, b: string): number {
   return i;
 }
 
-/** A readable excerpt around the first difference of a mismatch. */
 export function describeMismatch(mismatch: Mismatch, context = 240): string {
   const { path, what, expected, actual } = mismatch;
   if (what === "threw" || what === "skip") return `${path} ${what}\n${actual}`;

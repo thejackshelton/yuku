@@ -1,6 +1,4 @@
-// Fetches every project at its pinned commit.
-//
-//   bun test/projects/load.ts
+// fetches every project at its pinned commit
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -24,8 +22,9 @@ async function load(project: Project): Promise<void> {
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
   git(root, "init", "--quiet");
-  // keep line endings as committed
+  // keep line endings as committed, even where `text=auto` asks for the platform's
   git(root, "config", "core.autocrlf", "false");
+  git(root, "config", "core.eol", "lf");
   git(root, "remote", "add", "origin", `https://github.com/${project.repository}.git`);
   git(root, "sparse-checkout", "set", "--cone", ...project.sources);
   git(root, "fetch", "--quiet", "--depth", "1", "--filter=blob:none", "origin", project.commit);

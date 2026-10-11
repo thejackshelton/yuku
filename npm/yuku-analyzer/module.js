@@ -2,7 +2,6 @@ import { CHILD_KEYS, findAll, WalkContext, _walk, _walkAsync } from "yuku-ast";
 import { fileOptions } from "yuku-core";
 import { BindingFlags, decode } from "./decode.js";
 
-const _enc = new TextEncoder();
 const _dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 class Scope {
@@ -164,6 +163,9 @@ class Import {
   get node() {
     return this.#sem.import.node(this.id);
   }
+  get _scope() {
+    return this.module.scopes[this.#sem.import.scopeId(this.id)];
+  }
   get resolvedModule() {
     this.module.analyzer._link(this.module);
     return this._resolved;
@@ -258,8 +260,11 @@ export class Module {
     this.analyzer = analyzer;
     this.path = path;
     this.source = typeof source === "string" ? source : _dec.decode(source);
-    const bytes = typeof source === "string" ? _enc.encode(source) : source;
-    this.#r = decode(core.analyze(bytes, fileOptions({ ...options, path })), this.source, path);
+    this.#r = decode(
+      core.analyze(this.source, fileOptions({ ...options, path })),
+      this.source,
+      path,
+    );
     this.#sem = this.#r.semantic;
   }
 
@@ -416,6 +421,7 @@ export class Module {
     seen.add(this);
     this.analyzer._link(this);
     const names = new Set(this._exportMap().keys());
+    for (const name of this.analyzer._addedExports(this)) names.add(name);
     for (const star of this._starExports()) {
       if (star._resolved === null) continue;
       for (const name of star._resolved.exportedNames(seen)) {

@@ -64,6 +64,8 @@ pub fn generate(allocator: Allocator, tree: *Tree, options: Options) Error!Resul
     defer p.deinit();
     try p.emit(tree.root);
     std.debug.assert(p.owed == .null);
+    std.debug.assert(p.defer_trailing_of == .null);
+    std.debug.assert(p.links.items.len == 0);
     std.debug.assert(p.restricted == null);
     std.debug.assert(p.indent_depth == 0);
 
@@ -86,7 +88,8 @@ const Ctx = struct {
     no_instantiation: bool = false,
     no_jsx_tag: bool = false,
     tagged: bool = false,
-    item: bool = false,
+    defer_trailing: bool = false,
+    no_decorators: bool = false,
 };
 
 const Printer = struct {
@@ -102,13 +105,14 @@ const Printer = struct {
     // the node whose inside-comments a container prints
     current_idx: NodeIndex = .null,
     skip_leading_of: NodeIndex = .null,
+    defer_trailing_of: NodeIndex = .null,
     in_assign_target: bool = false,
     in_prologue: bool = false,
     decl_no_in: bool = false,
     definite_pending: bool = false,
     restricted: ?*bool = null,
     restricted_len: usize = 0,
-    // the list item whose trailing comments wait for its separator
+    // the node whose trailing comments follow its parent's next token
     owed: NodeIndex = .null,
 
     stack_floor: usize = 0,
@@ -118,6 +122,9 @@ const Printer = struct {
         idx: NodeIndex,
         inner: Ctx,
         wrap: bool,
+        // a cast strip removes, open for its comments
+        stripped: bool,
+        defer_trailing: bool,
         scope: CommentScope,
     };
 
@@ -153,7 +160,7 @@ const Printer = struct {
     }
 
     inline fn nodeData(self: *const Self, idx: NodeIndex) NodeData {
-        return self.node_data[@intFromEnum(idx)];
+        return self.node_data[@backingInt(idx)];
     }
 
     inline fn writeString(self: *Self, id: ast.String) Error!void {
@@ -172,7 +179,7 @@ const Printer = struct {
 
     fn emitItems(self: *Self, items: []const NodeIndex, rest: NodeIndex, ctx: Ctx) Error!void {
         var item_ctx = ctx;
-        item_ctx.item = true;
+        item_ctx.defer_trailing = true;
         const depth = self.indent_depth;
         for (items, 0..) |x, i| {
             try self.emitExpr(x, item_ctx);
@@ -187,10 +194,8 @@ const Printer = struct {
 
     // an item's separator precedes its trailing comments, so a line comment cannot swallow it
     fn closeItem(self: *Self, separated: bool, hang_depth: ?u32) Error!void {
-        const owed = self.owed;
-        self.owed = .null;
         if (separated) try self.out.writeByte(',');
-        if (owed != .null) try self.emitTrailingComments(self.tree.commentsOf(owed));
+        try self.emitOwedComments();
         if (!separated) return;
         if (hang_depth) |depth| if (self.indent_depth == depth and self.out.atLineStart()) {
             self.indent_depth = depth + 1;
@@ -266,11 +271,14 @@ const Printer = struct {
             .ts_import_equals_declaration,
             .ts_export_assignment,
             => return true,
+            // its comments alone would leave a bare `,`
+            .import_specifier => |sp| if (sp.import_kind == .type) return true,
+            .export_specifier => |sp| if (sp.export_kind == .type) return true,
             else => {},
         }
         if (self.hasPrintedComments(idx)) return false;
         return switch (data) {
-            .variable_declaration => |d| d.declare,
+            .variable_declaration => |d| isAmbient(self.tree, d),
             .function => |f| f.declare or
                 f.type == .ts_declare_function or
                 f.type == .ts_empty_body_function_expression,
@@ -280,7 +288,6 @@ const Printer = struct {
             .property_definition => |d| d.declare or d.abstract,
             .import_declaration => |d| d.import_kind == .type or (d.specifiers.len > 0 and
                 !hasValueImportSpecifier(self.tree, self.tree.extra(d.specifiers))),
-            .import_specifier => |sp| sp.import_kind == .type,
             .export_named_declaration => |d| if (d.declaration != .null)
                 d.export_kind == .type or self.stripsToNothing(d.declaration)
             else
@@ -289,7 +296,6 @@ const Printer = struct {
             .export_default_declaration => |d| self.nodeData(d.declaration).isDeclaration() and
                 self.stripsToNothing(d.declaration),
             .export_all_declaration => |d| d.export_kind == .type,
-            .export_specifier => |sp| sp.export_kind == .type,
             else => false,
         };
     }
@@ -332,12 +338,12 @@ const Printer = struct {
 
         const wrap = self.needsParens(idx, ctx);
         var inner: Ctx = if (wrap) .{} else ctx;
-        inner.item = false;
+        inner.defer_trailing = false;
         if (wrap) try self.out.writeByte('(');
         if (self.options.comments != .none) {
             const scope = try self.openComments(idx);
             try self.emitNode(idx, inner);
-            try self.closeComments(idx, scope, ctx.item);
+            try self.closeComments(idx, scope, ctx.defer_trailing);
         } else {
             try self.emitNode(idx, inner);
         }
@@ -345,11 +351,10 @@ const Printer = struct {
     }
 
     inline fn openComments(self: *Self, idx: NodeIndex) Error!CommentScope {
-        std.debug.assert(self.options.comments != .none);
         const comments = self.tree.commentsOf(idx);
         const scope: CommentScope = .{
             .prev_idx = self.current_idx,
-            .commented = comments.len > 0,
+            .commented = self.options.comments != .none and comments.len > 0,
         };
         self.current_idx = idx;
         if (scope.commented) {
@@ -364,11 +369,11 @@ const Printer = struct {
         self: *Self,
         idx: NodeIndex,
         scope: CommentScope,
-        item: bool,
+        defer_trailing: bool,
     ) Error!void {
         std.debug.assert(self.current_idx == idx);
         if (scope.commented) {
-            if (item) {
+            if (defer_trailing or idx == self.defer_trailing_of) {
                 std.debug.assert(self.owed == .null);
                 self.owed = idx;
             } else {
@@ -376,6 +381,25 @@ const Printer = struct {
             }
         }
         self.current_idx = scope.prev_idx;
+    }
+
+    fn writeNodeText(self: *Self, idx: NodeIndex, text: []const u8) Error!void {
+        const scope = try self.openComments(idx);
+        try self.out.writeStr(text);
+        try self.closeComments(idx, scope, false);
+    }
+
+    fn emitOwedComments(self: *Self) Error!void {
+        const owed = self.owed;
+        if (owed == .null) return;
+        self.owed = .null;
+        try self.emitTrailingComments(self.tree.commentsOf(owed));
+    }
+
+    fn writeKeywordThenOwed(self: *Self, keyword: []const u8) Error!void {
+        try self.out.writeStr(keyword);
+        try self.emitOwedComments();
+        if (!self.out.atLineStart()) try self.out.writeByte(' ');
     }
 
     fn emitLink(self: *Self, comptime tag: NodeTag, node: anytype, ctx: Ctx) Error!void {
@@ -395,7 +419,9 @@ const Printer = struct {
             return self.emitExpr(head.idx, head.ctx);
         }
 
+        if (self.options.strip) std.debug.assert(!head.ctx.defer_trailing);
         const base = self.links.items.len;
+        _ = try self.openStrippedCasts(head.idx, first, false);
         var link = try self.openLink(first, head.ctx);
         while (true) {
             const next_head = self.linkHeadOf(link.idx, link.inner);
@@ -405,11 +431,13 @@ const Printer = struct {
                 break;
             }
             std.debug.assert(self.links.items.len - base < self.tree.nodes.len);
+            if (self.options.strip) std.debug.assert(!next_head.ctx.defer_trailing);
             try self.links.append(self.allocator, link);
+            _ = try self.openStrippedCasts(next_head.idx, next, false);
             link = try self.openLink(next, next_head.ctx);
         }
         while (true) {
-            try self.emitLinkSuffixOf(link);
+            if (!link.stripped) try self.emitLinkSuffixOf(link);
             try self.closeLink(link);
             if (self.links.items.len == base) break;
             link = self.links.pop().?;
@@ -418,33 +446,71 @@ const Printer = struct {
 
     fn openLink(self: *Self, idx: NodeIndex, ctx: Ctx) Error!Link {
         std.debug.assert(isChainLink(self.tagOf(idx)));
-        std.debug.assert(!ctx.item);
         const wrap = self.needsParens(idx, ctx);
         if (wrap) try self.out.writeByte('(');
-        const scope: CommentScope = if (self.options.comments != .none)
-            try self.openComments(idx)
-        else
-            .{ .prev_idx = .null, .commented = false };
+        const scope = try self.openComments(idx);
         self.recordMapping(idx);
+        var inner: Ctx = if (wrap) .{} else ctx;
+        inner.defer_trailing = false;
         return .{
             .idx = idx,
-            .inner = if (wrap) .{} else ctx,
+            .inner = inner,
             .wrap = wrap,
+            .stripped = false,
+            .defer_trailing = ctx.defer_trailing,
             .scope = scope,
         };
     }
 
     fn closeLink(self: *Self, link: Link) Error!void {
-        if (self.options.comments != .none) try self.closeComments(link.idx, link.scope, false);
+        try self.closeComments(link.idx, link.scope, link.defer_trailing);
         if (link.wrap) try self.out.writeByte(')');
     }
 
+    // only the outermost cast defers, so the comments print in source order
+    fn openStrippedCasts(
+        self: *Self,
+        outer: NodeIndex,
+        operand: NodeIndex,
+        defer_trailing: bool,
+    ) Error!bool {
+        if (self.options.comments == .none) return false;
+        var opened = false;
+        var cast = outer;
+        for (0..self.tree.nodes.len) |_| {
+            if (cast == operand) return opened;
+            if (self.tree.commentsOf(cast).len > 0) {
+                try self.links.append(self.allocator, .{
+                    .idx = cast,
+                    .inner = .{},
+                    .wrap = false,
+                    .stripped = true,
+                    .defer_trailing = defer_trailing and !opened,
+                    .scope = try self.openComments(cast),
+                });
+                opened = true;
+            }
+            cast = strippedOperand(self.tree, cast);
+        }
+        unreachable;
+    }
+
+    fn emitStrippedOperand(self: *Self, outer: NodeIndex, operand: NodeIndex, ctx: Ctx) Error!void {
+        const base = self.links.items.len;
+        var operand_ctx = ctx;
+        if (try self.openStrippedCasts(outer, operand, ctx.defer_trailing)) {
+            operand_ctx.defer_trailing = false;
+        }
+        try self.emitExpr(operand, operand_ctx);
+        while (self.links.items.len > base) try self.closeLink(self.links.pop().?);
+    }
+
     inline fn tagOf(self: *const Self, idx: NodeIndex) NodeTag {
-        return std.meta.activeTag(self.node_data[@intFromEnum(idx)]);
+        return std.meta.activeTag(self.node_data[@backingInt(idx)]);
     }
 
     fn linkHeadOf(self: *const Self, idx: NodeIndex, ctx: Ctx) Head {
-        return switch (self.node_data[@intFromEnum(idx)]) {
+        return switch (self.node_data[@backingInt(idx)]) {
             inline else => |*node, tag| if (comptime isChainLink(tag))
                 self.linkHead(tag, node, ctx)
             else
@@ -453,7 +519,7 @@ const Printer = struct {
     }
 
     fn emitLinkSuffixOf(self: *Self, link: Link) Error!void {
-        switch (self.node_data[@intFromEnum(link.idx)]) {
+        switch (self.node_data[@backingInt(link.idx)]) {
             inline else => |*node, tag| if (comptime isChainLink(tag)) {
                 try self.emitLinkSuffix(tag, node, link.inner);
             } else unreachable,
@@ -510,7 +576,11 @@ const Printer = struct {
             },
             .ts_as_expression, .ts_satisfies_expression => .{
                 .idx = node.expression,
-                .ctx = .{ .prec = Precedence.Relational, .no_in = ctx.no_in },
+                .ctx = .{
+                    .prec = Precedence.Relational,
+                    .no_in = ctx.no_in,
+                    .defer_trailing = true,
+                },
             },
             else => @compileError("not a chain link: " ++ @tagName(tag)),
         };
@@ -567,7 +637,11 @@ const Printer = struct {
                     try self.out.writeByte(']');
                 } else {
                     try self.out.writeStr(if (node.optional) "?." else ".");
-                    if (static_key) |k| try self.out.writeStr(k) else try self.emit(node.property);
+                    if (static_key) |k| {
+                        try self.writeNodeText(node.property, k);
+                    } else {
+                        try self.emit(node.property);
+                    }
                 }
             },
             .call_expression => {
@@ -583,11 +657,11 @@ const Printer = struct {
             .ts_non_null_expression => try self.out.writeByte('!'),
             .ts_instantiation_expression => try self.emit(node.type_arguments),
             .ts_as_expression => {
-                try self.out.writeStr(" as ");
+                try self.writeKeywordThenOwed(" as");
                 try self.emit(node.type_annotation);
             },
             .ts_satisfies_expression => {
-                try self.out.writeStr(" satisfies ");
+                try self.writeKeywordThenOwed(" satisfies");
                 try self.emit(node.type_annotation);
             },
             else => @compileError("not a chain link: " ++ @tagName(tag)),
@@ -606,13 +680,15 @@ const Printer = struct {
             .ts_namespace_export_declaration,
             .ts_this_parameter,
             => return true,
+            .import_specifier => |s| return s.import_kind == .type,
+            .export_specifier => |s| return s.export_kind == .type,
             .ts_as_expression,
             .ts_satisfies_expression,
             .ts_type_assertion,
             .ts_non_null_expression,
             .ts_instantiation_expression,
             => {
-                try self.emitExpr(self.stripped(idx), ctx);
+                try self.emitStrippedOperand(idx, self.stripped(idx), ctx);
                 return true;
             },
             .ts_enum_declaration => |e| {
@@ -645,7 +721,7 @@ const Printer = struct {
                     idx,
                     "parameter properties cannot be stripped to JavaScript",
                 );
-                try self.emitExpr(pp.parameter, ctx);
+                try self.emitStrippedOperand(idx, pp.parameter, ctx);
                 return true;
             },
             else => return false,
@@ -655,7 +731,7 @@ const Printer = struct {
     // minify's `!0` ranks as unary
     inline fn precedenceOf(self: *const Self, idx: NodeIndex) u8 {
         const data = self.nodeData(idx);
-        const fixed = node_precedence[@intFromEnum(std.meta.activeTag(data))];
+        const fixed = node_precedence[@backingInt(std.meta.activeTag(data))];
         if (fixed != operator_precedence) return fixed;
         return switch (data) {
             .logical_expression => |l| l.operator.toToken().precedence(),
@@ -724,7 +800,7 @@ const Printer = struct {
         @setEvalBranchQuota(10_000);
         self.recordMapping(idx);
 
-        switch (self.node_data[@intFromEnum(idx)]) {
+        switch (self.node_data[@backingInt(idx)]) {
             // out of line, so the recursion's frame holds only what every node needs
             inline else => |*node, tag| {
                 if (comptime isChainLink(tag)) {
@@ -732,17 +808,14 @@ const Printer = struct {
                 }
                 if (comptime fixedString(tag)) |s| {
                     try self.out.writeStr(s);
+                } else if (comptime emittedByParent(tag)) {
+                    std.debug.panic("codegen: {s} is emitted by its parent", .{@tagName(tag)});
                 } else {
-                    const fn_name = "emit_" ++ @tagName(tag);
-                    if (comptime @hasDecl(Self, fn_name)) {
-                        const f = @field(Self, fn_name);
-                        if (comptime @typeInfo(@TypeOf(f)).@"fn".params.len == 3) {
-                            try @call(.never_inline, f, .{ self, node, ctx });
-                        } else {
-                            try @call(.never_inline, f, .{ self, node });
-                        }
+                    const emitter = @field(Self, "emit_" ++ @tagName(tag));
+                    if (comptime @typeInfo(@TypeOf(emitter)).@"fn".param_types.len == 3) {
+                        try @call(.never_inline, emitter, .{ self, node, ctx });
                     } else {
-                        std.debug.panic("codegen: not implemented for {s}", .{@tagName(tag)});
+                        try @call(.never_inline, emitter, .{ self, node });
                     }
                 }
             },
@@ -843,8 +916,15 @@ const Printer = struct {
         try self.out.writeStr(std.mem.trimEnd(u8, it.first(), "\r"));
         while (it.next()) |line| {
             try self.breakLine();
+            const text = std.mem.trimStart(u8, std.mem.trimEnd(u8, line, "\r"), " \t");
+            // a line break alone would collapse a blank line
+            if (text.len == 0 and it.peek() != null) {
+                self.out.held_spaces = 0;
+                try self.out.writeComment("\n");
+                continue;
+            }
             try self.out.writeByte(' ');
-            try self.out.writeStr(std.mem.trimStart(u8, std.mem.trimEnd(u8, line, "\r"), " \t"));
+            try self.out.writeStr(text);
         }
     }
 
@@ -869,7 +949,7 @@ const Printer = struct {
     fn emit_program(self: *Self, p: *const ast.Program) Error!void {
         if (p.hashbang) |h| {
             try self.out.writeStr("#!");
-            try self.writeString(h.value);
+            try self.out.writeRawStr(self.tree.string(h.value));
             try self.out.writeByte('\n');
         }
         try self.printStmtList(p.body, true);
@@ -940,6 +1020,26 @@ const Printer = struct {
         }
     }
 
+    // a line comment breaks the node open like a block
+    fn emitInsideCommentsInline(self: *Self, idx: NodeIndex) Error!void {
+        if (self.options.comments == .none) return;
+        const comments = self.tree.commentsOf(idx);
+        var any = false;
+        for (comments) |c| {
+            if (c.position != .inside or !self.allowComment(c)) continue;
+            if (c.type == .line) return self.emitInsideComments(idx);
+            any = true;
+        }
+        if (!any) return;
+        for (comments) |c| {
+            if (c.position != .inside or !self.allowComment(c)) continue;
+            if (self.pretty() and needsSpaceBeforeInlineComment(self.out.lastByte())) {
+                try self.out.writeByte(' ');
+            }
+            try self.writeCommentBody(c);
+        }
+    }
+
     // compact mode defers `;` so a closing `}` can drop it
     inline fn softSemi(self: *Self) Error!void {
         if (self.pretty()) try self.out.writeByte(';') else self.pending_semi = true;
@@ -969,7 +1069,9 @@ const Printer = struct {
     fn emit_directive(self: *Self, d: *const ast.Directive) Error!void {
         // an escaped `"use strict"` does not enable strict mode, so the raw lexeme must survive
         switch (self.nodeData(d.expression)) {
-            .string_literal => |lit| try self.writeString(lit.raw),
+            .string_literal => |lit| {
+                try self.writeNodeText(d.expression, self.tree.string(lit.raw));
+            },
             else => try self.emit(d.expression),
         }
         try self.softSemi();
@@ -982,6 +1084,7 @@ const Printer = struct {
 
     fn emit_debugger_statement(self: *Self, _: *const ast.DebuggerStatement) Error!void {
         try self.out.writeStr("debugger");
+        try self.emitInsideCommentsInline(self.current_idx);
         try self.softSemi();
     }
 
@@ -1018,6 +1121,7 @@ const Printer = struct {
 
     fn emit_return_statement(self: *Self, s: *const ast.ReturnStatement) Error!void {
         try self.out.writeStr("return");
+        try self.emitInsideCommentsInline(self.current_idx);
         try self.emitRestrictedArg(s.argument, .{});
         try self.softSemi();
     }
@@ -1068,6 +1172,7 @@ const Printer = struct {
 
     fn printJump(self: *Self, keyword: []const u8, label: NodeIndex) Error!void {
         try self.out.writeStr(keyword);
+        try self.emitInsideCommentsInline(self.current_idx);
         if (label != .null) {
             try self.out.writeByte(' ');
             try self.emit(label);
@@ -1119,7 +1224,7 @@ const Printer = struct {
         try self.out.space();
         try self.out.writeByte('(');
         if (s.init != .null) switch (self.nodeData(s.init)) {
-            .variable_declaration => |d| try self.printVariableDecl(d, false, true),
+            .variable_declaration => |d| try self.printForDeclaration(s.init, d, true),
             else => try self.emitExpr(s.init, .{ .no_in = true }),
         };
         try self.out.writeByte(';');
@@ -1168,9 +1273,20 @@ const Printer = struct {
 
     fn printForLeft(self: *Self, idx: NodeIndex) Error!void {
         switch (self.nodeData(idx)) {
-            .variable_declaration => |d| try self.printVariableDecl(d, false, false),
+            .variable_declaration => |d| try self.printForDeclaration(idx, d, false),
             else => try self.emitAssignTarget(idx, .{}),
         }
+    }
+
+    fn printForDeclaration(
+        self: *Self,
+        idx: NodeIndex,
+        d: ast.VariableDeclaration,
+        no_in: bool,
+    ) Error!void {
+        const scope = try self.openComments(idx);
+        try self.printVariableDecl(d, false, no_in);
+        try self.closeComments(idx, scope, false);
     }
 
     fn emit_switch_statement(self: *Self, s: *const ast.SwitchStatement) Error!void {
@@ -1200,7 +1316,9 @@ const Printer = struct {
             try self.emit(c.@"test");
             try self.out.writeByte(':');
         } else {
-            try self.out.writeStr("default:");
+            try self.out.writeStr("default");
+            try self.emitInsideCommentsInline(self.current_idx);
+            try self.out.writeByte(':');
         }
         if (c.consequent.len == 0) return;
         _ = try self.printIndentedStmtList(c.consequent, false);
@@ -1233,7 +1351,7 @@ const Printer = struct {
     }
 
     fn emit_variable_declaration(self: *Self, d: *const ast.VariableDeclaration) Error!void {
-        if (self.options.strip) if (d.declare) return;
+        if (self.options.strip) if (isAmbient(self.tree, d.*)) return;
         try self.printVariableDecl(d.*, true, false);
     }
 
@@ -1370,13 +1488,14 @@ const Printer = struct {
         defer self.in_assign_target = in_target;
 
         try self.out.writeByte('[');
+        try self.emitInsideCommentsInline(self.current_idx);
         const list = self.tree.extra(e.elements);
         const depth = self.indent_depth;
         for (list, 0..) |x, i| {
             if (in_target) {
-                try self.emitAssignTarget(x, .{ .item = true });
+                try self.emitAssignTarget(x, .{ .defer_trailing = true });
             } else {
-                try self.emitExpr(x, .{ .prec = Precedence.Assignment, .item = true });
+                try self.emitExpr(x, .{ .prec = Precedence.Assignment, .defer_trailing = true });
             }
             try self.closeItem(i + 1 < list.len, depth);
         }
@@ -1391,13 +1510,14 @@ const Printer = struct {
         defer self.in_assign_target = in_target;
 
         try self.out.writeByte('{');
+        try self.emitInsideCommentsInline(self.current_idx);
         const list = self.tree.extra(e.properties);
         if (list.len > 0) {
             try self.out.space();
             const depth = self.indent_depth;
             for (list, 0..) |x, i| {
                 self.in_assign_target = in_target;
-                try self.emitExpr(x, .{ .item = true });
+                try self.emitExpr(x, .{ .defer_trailing = true });
                 try self.closeItem(i + 1 < list.len, depth);
             }
             try self.closeList(depth);
@@ -1418,7 +1538,7 @@ const Printer = struct {
                 },
             }
             try self.printObjectKey(p.key, p.computed);
-            try self.printFunctionAsMethod(fn_data);
+            try self.emitMethodValue(p.value);
             return;
         }
 
@@ -1704,6 +1824,7 @@ const Printer = struct {
         const definite = self.takeDefinite();
         if (!self.options.strip) try self.printDecorators(id.decorators);
         try self.writeString(id.name);
+        if (id.optional) try self.emitInsideCommentsInline(self.current_idx);
         try self.printBindingSuffix(id.optional, definite, id.type_annotation);
     }
 
@@ -1737,14 +1858,15 @@ const Printer = struct {
         const definite = self.takeDefinite();
         if (!self.options.strip) try self.printDecorators(p.decorators);
         try self.out.writeByte('[');
+        try self.emitInsideCommentsInline(self.current_idx);
         const list = self.tree.extra(p.elements);
         const depth = self.indent_depth;
         for (list, 0..) |x, i| {
-            try self.emitAssignTarget(x, .{ .item = true });
+            try self.emitAssignTarget(x, .{ .defer_trailing = true });
             try self.closeItem(i + 1 < list.len or p.rest != .null, depth);
         }
         if (p.rest != .null) {
-            try self.emitExpr(p.rest, .{ .item = true });
+            try self.emitExpr(p.rest, .{ .defer_trailing = true });
             try self.closeItem(false, depth);
         }
         try self.closeList(depth);
@@ -1760,6 +1882,7 @@ const Printer = struct {
         const definite = self.takeDefinite();
         if (!self.options.strip) try self.printDecorators(p.decorators);
         try self.out.writeByte('{');
+        try self.emitInsideCommentsInline(self.current_idx);
         const list = self.tree.extra(p.properties);
         const has_any = list.len > 0 or p.rest != .null;
         if (has_any) try self.out.space();
@@ -1795,7 +1918,7 @@ const Printer = struct {
         if (self.options.minify) {
             if (simpleStringKey(self.tree, key)) |s| {
                 const proto_clash = computed and std.mem.eql(u8, s, "__proto__");
-                if (!proto_clash) return self.out.writeStr(s);
+                if (!proto_clash) return self.writeNodeText(key, s);
             }
         }
         try self.printPropertyKey(key, computed);
@@ -1811,10 +1934,10 @@ const Printer = struct {
     ) Error!void {
         if (self.options.minify) {
             if (simpleStringKey(self.tree, key)) |s| {
-                if (!computed) return self.out.writeStr(s);
+                if (!computed) return self.writeNodeText(key, s);
                 const ctor_clash = std.mem.eql(u8, s, "constructor") and (is_field or !static);
                 const proto_clash = static and std.mem.eql(u8, s, "prototype");
-                if (!ctor_clash and !proto_clash) return self.out.writeStr(s);
+                if (!ctor_clash and !proto_clash) return self.writeNodeText(key, s);
             }
         }
         try self.printPropertyKey(key, computed);
@@ -1838,6 +1961,12 @@ const Printer = struct {
         try self.printFunctionAsMethod(f.*);
     }
 
+    fn emitMethodValue(self: *Self, idx: NodeIndex) Error!void {
+        const scope = try self.openComments(idx);
+        try self.printFunctionAsMethod(self.nodeData(idx).function);
+        try self.closeComments(idx, scope, false);
+    }
+
     fn printFunctionAsMethod(self: *Self, f: ast.Function) Error!void {
         try self.emit(f.type_parameters);
         try self.printParams(f.params);
@@ -1858,10 +1987,11 @@ const Printer = struct {
         if (a.async) try self.out.writeStr("async ");
         try self.emitExpr(a.type_parameters, .{ .no_jsx_tag = true });
         try self.printParams(a.params);
-        try self.emit(a.return_type);
+        try self.emitExpr(a.return_type, .{ .defer_trailing = true });
         try self.out.space();
         try self.out.writeStr("=>");
-        try self.out.space();
+        try self.emitOwedComments();
+        if (!self.out.atLineStart()) try self.out.space();
         if (a.expression) {
             self.out.lead = .arrow;
             try self.emitExpr(a.body, .{ .prec = Precedence.Assignment, .no_in = ctx.no_in });
@@ -1875,6 +2005,7 @@ const Printer = struct {
         const params = self.tree.data(idx).formal_parameters;
         try self.out.writeByte('(');
         try self.emitKeptItems(self.tree.extra(params.items), params.rest);
+        try self.emitInsideCommentsInline(self.current_idx);
         try self.out.writeByte(')');
     }
 
@@ -1892,19 +2023,19 @@ const Printer = struct {
                 try self.emitNothing(node);
                 continue;
             }
-            try self.emitExpr(node, .{ .item = true });
+            try self.emitExpr(node, .{ .defer_trailing = true });
             try self.closeItem(i + 1 < end or rest != .null, depth);
         }
         if (rest != .null) {
-            try self.emitExpr(rest, .{ .item = true });
+            try self.emitExpr(rest, .{ .defer_trailing = true });
             try self.closeItem(false, depth);
         }
         try self.closeList(depth);
     }
 
-    fn emit_class(self: *Self, c: *const ast.Class) Error!void {
+    fn emit_class(self: *Self, c: *const ast.Class, ctx: Ctx) Error!void {
         if (self.options.strip) if (c.declare) return;
-        try self.printDecorators(c.decorators);
+        if (!ctx.no_decorators) try self.printDecorators(c.decorators);
         if (!self.options.strip) {
             if (c.declare) try self.out.writeStr("declare ");
             if (c.abstract) try self.out.writeStr("abstract ");
@@ -1982,7 +2113,7 @@ const Printer = struct {
         }
         try self.printClassKey(m.key, m.computed, m.static, false);
         if (!self.options.strip) if (m.optional) try self.out.writeByte('?');
-        try self.printFunctionAsMethod(fn_data);
+        try self.emitMethodValue(m.value);
     }
 
     fn emit_property_definition(self: *Self, p: *const ast.PropertyDefinition) Error!void {
@@ -2004,11 +2135,14 @@ const Printer = struct {
             if (p.readonly) try self.out.writeStr("readonly ");
         }
         if (p.accessor) try self.out.writeStr("accessor ");
+        if (!self.options.strip and p.definite) self.defer_trailing_of = p.key;
         try self.printClassKey(p.key, p.computed, p.static, true);
+        self.defer_trailing_of = .null;
         if (!self.options.strip) {
             if (p.optional) try self.out.writeByte('?');
             if (p.definite) try self.out.writeByte('!');
         }
+        try self.emitOwedComments();
         try self.emit(p.type_annotation);
         if (p.value != .null) {
             try self.printEq();
@@ -2073,7 +2207,7 @@ const Printer = struct {
             const depth = self.indent_depth;
             var i: usize = 0;
             if (self.nodeData(list[0]) == .import_default_specifier) {
-                try self.emitExpr(list[0], .{ .item = true });
+                try self.emitExpr(list[0], .{ .defer_trailing = true });
                 try self.closeItem(list.len > 1, depth);
                 i = 1;
             }
@@ -2100,10 +2234,11 @@ const Printer = struct {
     }
 
     fn emit_import_specifier(self: *Self, s: *const ast.ImportSpecifier) Error!void {
-        if (self.options.strip) if (s.import_kind == .type) return;
+        if (self.options.strip) std.debug.assert(s.import_kind != .type);
         if (s.import_kind == .type) try self.out.writeStr("type ");
         try self.emit(s.imported);
-        if (!sameIdentifier(self.tree, s.imported, s.local)) {
+        const same = sameIdentifier(self.tree, s.imported, s.local);
+        if (!same or self.hasPrintedComments(s.local)) {
             try self.out.writeStr(" as ");
             try self.emit(s.local);
         }
@@ -2159,14 +2294,17 @@ const Printer = struct {
         if (self.options.strip and d.declaration != .null and self.stripsToNothing(d.declaration)) {
             return self.emitNothing(d.declaration);
         }
+        const hoisted = self.decoratorsBeforeExport(d.declaration);
+        if (hoisted) |decorators| try self.printDecorators(decorators);
         try self.out.writeStr("export");
         if (d.export_kind == .type and d.declaration == .null) try self.out.writeStr(" type");
         if (d.declaration != .null) {
             try self.out.writeByte(' ');
-            return self.emit(d.declaration);
+            return self.emitExpr(d.declaration, .{ .no_decorators = hoisted != null });
         }
         try self.out.space();
         try self.out.writeByte('{');
+        try self.emitInsideCommentsInline(self.current_idx);
         if (list.len > 0) {
             try self.out.space();
             try self.emitKeptItems(list, .null);
@@ -2189,13 +2327,27 @@ const Printer = struct {
             if (self.options.strip and self.stripsToNothing(d.declaration)) {
                 return self.emitNothing(d.declaration);
             }
+            const hoisted = self.decoratorsBeforeExport(d.declaration);
+            if (hoisted) |decorators| try self.printDecorators(decorators);
             try self.out.writeStr("export default ");
-            return self.emit(d.declaration);
+            return self.emitExpr(d.declaration, .{ .no_decorators = hoisted != null });
         }
         try self.out.writeStr("export default ");
         self.out.lead = .export_default;
         try self.emitExpr(d.declaration, .{ .prec = Precedence.Assignment });
         try self.softSemi();
+    }
+
+    fn decoratorsBeforeExport(self: *const Self, declaration: NodeIndex) ?IndexRange {
+        if (declaration == .null) return null;
+        const decorators = switch (self.nodeData(declaration)) {
+            .class => |c| c.decorators,
+            else => return null,
+        };
+        if (decorators.len == 0) return null;
+        const first = self.tree.extra(decorators)[0];
+        if (self.tree.span(first).start < self.tree.span(declaration).start) return decorators;
+        return null;
     }
 
     fn emit_export_all_declaration(self: *Self, d: *const ast.ExportAllDeclaration) Error!void {
@@ -2214,10 +2366,11 @@ const Printer = struct {
     }
 
     fn emit_export_specifier(self: *Self, s: *const ast.ExportSpecifier) Error!void {
-        if (self.options.strip) if (s.export_kind == .type) return;
+        if (self.options.strip) std.debug.assert(s.export_kind != .type);
         if (s.export_kind == .type) try self.out.writeStr("type ");
         try self.emit(s.local);
-        if (!sameIdentifier(self.tree, s.local, s.exported)) {
+        const same = sameIdentifier(self.tree, s.local, s.exported);
+        if (!same or self.hasPrintedComments(s.exported)) {
             try self.out.writeStr(" as ");
             try self.emit(s.exported);
         }
@@ -2325,8 +2478,8 @@ const Printer = struct {
         try self.printTemplate(t.quasis, t.types, false);
     }
 
-    fn emitType(self: *Self, idx: NodeIndex, floor: u8) Error!void {
-        try self.wrapIf(self.typePrec(idx) < floor, idx);
+    fn emitType(self: *Self, idx: NodeIndex, floor: u8, ctx: Ctx) Error!void {
+        try self.wrapIf(self.typePrec(idx) < floor, idx, ctx);
     }
 
     fn typePrec(self: *const Self, idx: NodeIndex) u8 {
@@ -2344,19 +2497,23 @@ const Printer = struct {
     }
 
     fn emit_ts_array_type(self: *Self, t: *const ast.TSArrayType) Error!void {
-        try self.emitType(t.element_type, TPrec.primary);
-        try self.out.writeStr("[]");
+        try self.emitType(t.element_type, TPrec.primary, .{ .defer_trailing = true });
+        try self.out.writeByte('[');
+        try self.emitOwedComments();
+        try self.out.writeByte(']');
     }
 
     fn emit_ts_indexed_access_type(self: *Self, t: *const ast.TSIndexedAccessType) Error!void {
-        try self.emitType(t.object_type, TPrec.primary);
+        try self.emitType(t.object_type, TPrec.primary, .{ .defer_trailing = true });
         try self.out.writeByte('[');
+        try self.emitOwedComments();
         try self.emit(t.index_type);
         try self.out.writeByte(']');
     }
 
     fn emit_ts_tuple_type(self: *Self, t: *const ast.TSTupleType) Error!void {
         try self.out.writeByte('[');
+        try self.emitInsideCommentsInline(self.current_idx);
         try self.emitList(t.element_types);
         try self.out.writeByte(']');
     }
@@ -2370,7 +2527,7 @@ const Printer = struct {
     }
 
     fn emit_ts_optional_type(self: *Self, t: *const ast.TSOptionalType) Error!void {
-        try self.emitType(t.type_annotation, TPrec.primary);
+        try self.emitType(t.type_annotation, TPrec.primary, .{});
         try self.out.writeByte('?');
     }
 
@@ -2418,14 +2575,14 @@ const Printer = struct {
                 try self.out.writeByte(op);
                 try self.out.space();
             }
-            try self.emitType(x, floor);
+            try self.emitType(x, floor, .{});
         }
     }
 
     fn emit_ts_conditional_type(self: *Self, t: *const ast.TSConditionalType) Error!void {
-        try self.emitType(t.check_type, TPrec.@"union");
-        try self.out.writeStr(" extends ");
-        try self.emitType(t.extends_type, TPrec.@"union");
+        try self.emitType(t.check_type, TPrec.@"union", .{ .defer_trailing = true });
+        try self.writeKeywordThenOwed(" extends");
+        try self.emitType(t.extends_type, TPrec.@"union", .{});
         try self.out.space();
         try self.out.writeByte('?');
         try self.out.space();
@@ -2444,7 +2601,7 @@ const Printer = struct {
     fn emit_ts_type_operator(self: *Self, t: *const ast.TSTypeOperator) Error!void {
         try self.out.writeStr(t.operator.toString());
         try self.out.writeByte(' ');
-        try self.emitType(t.type_annotation, TPrec.operator);
+        try self.emitType(t.type_annotation, TPrec.operator, .{});
     }
 
     fn emit_ts_parenthesized_type(self: *Self, t: *const ast.TSParenthesizedType) Error!void {
@@ -2480,18 +2637,21 @@ const Printer = struct {
     fn emitUnwrappedType(self: *Self, idx: NodeIndex) Error!void {
         if (idx == .null) return;
         switch (self.nodeData(idx)) {
-            .ts_type_annotation => |t| try self.emit(t.type_annotation),
+            .ts_type_annotation => |t| {
+                const scope = try self.openComments(idx);
+                try self.emit(t.type_annotation);
+                try self.closeComments(idx, scope, false);
+            },
             else => try self.emit(idx),
         }
     }
 
     fn emit_ts_type_predicate(self: *Self, t: *const ast.TSTypePredicate) Error!void {
         if (t.asserts) try self.out.writeStr("asserts ");
-        try self.emit(t.parameter_name);
-        if (t.type_annotation != .null) {
-            try self.out.writeStr(" is ");
-            try self.emitUnwrappedType(t.type_annotation);
-        }
+        if (t.type_annotation == .null) return self.emit(t.parameter_name);
+        try self.emitExpr(t.parameter_name, .{ .defer_trailing = true });
+        try self.writeKeywordThenOwed(" is");
+        try self.emitUnwrappedType(t.type_annotation);
     }
 
     fn emit_ts_type_literal(self: *Self, t: *const ast.TSTypeLiteral) Error!void {
@@ -2610,6 +2770,8 @@ const Printer = struct {
             self.indent_depth -= 1;
             self.pending_semi = false;
             try self.newline();
+        } else if (self.options.comments != .none) {
+            try self.emitInsideComments(self.current_idx);
         }
         try self.out.writeByte('}');
     }
@@ -2624,13 +2786,14 @@ const Printer = struct {
         try self.emit(d.type_parameters);
         try self.printEq();
         // a leftmost bare `intrinsic` reference would reparse as the keyword
-        try self.wrapIf(self.isLeftmostIntrinsicReference(d.type_annotation), d.type_annotation);
+        const intrinsic = self.isLeftmostIntrinsicReference(d.type_annotation);
+        try self.wrapIf(intrinsic, d.type_annotation, .{});
         try self.softSemi();
     }
 
-    fn wrapIf(self: *Self, cond: bool, idx: NodeIndex) Error!void {
+    fn wrapIf(self: *Self, cond: bool, idx: NodeIndex, ctx: Ctx) Error!void {
         if (cond) try self.out.writeByte('(');
-        try self.emit(idx);
+        try self.emitExpr(idx, ctx);
         if (cond) try self.out.writeByte(')');
     }
 
@@ -2699,11 +2862,13 @@ const Printer = struct {
             self.indent_depth += 1;
             for (list, 0..) |m, i| {
                 try self.newline();
-                try self.emitExpr(m, .{ .item = true });
+                try self.emitExpr(m, .{ .defer_trailing = true });
                 try self.closeItem(i + 1 < list.len, null);
             }
             self.indent_depth -= 1;
             try self.newline();
+        } else if (self.options.comments != .none) {
+            try self.emitInsideComments(self.current_idx);
         }
         try self.out.writeByte('}');
     }
@@ -2867,7 +3032,7 @@ const Printer = struct {
             try self.out.writeByte('=');
             // jsx attribute strings have no escapes, the raw lexeme is the value
             switch (self.nodeData(a.value)) {
-                .string_literal => |lit| try self.writeString(lit.raw),
+                .string_literal => |lit| try self.writeNodeText(a.value, self.tree.string(lit.raw)),
                 else => try self.emit(a.value),
             }
         }
@@ -2889,10 +3054,25 @@ const Printer = struct {
         try self.out.writeByte('}');
     }
 
-    fn emit_jsx_empty_expression(_: *Self, _: *const ast.JSXEmptyExpression) Error!void {}
+    fn emit_jsx_empty_expression(self: *Self, _: *const ast.JSXEmptyExpression) Error!void {
+        try self.emitInsideCommentsInline(self.current_idx);
+    }
+
+    fn emit_jsx_opening_fragment(self: *Self, _: *const ast.JSXOpeningFragment) Error!void {
+        try self.out.writeByte('<');
+        try self.emitInsideCommentsInline(self.current_idx);
+        try self.out.writeByte('>');
+    }
+
+    fn emit_jsx_closing_fragment(self: *Self, _: *const ast.JSXClosingFragment) Error!void {
+        try self.out.writeStr("</");
+        try self.emitInsideCommentsInline(self.current_idx);
+        try self.out.writeByte('>');
+    }
 
     fn emit_jsx_text(self: *Self, t: *const ast.JSXText) Error!void {
-        try self.out.writeRawStr(self.tree.string(t.value));
+        const raw = self.tree.string(t.raw);
+        try self.out.writeRawStr(if (raw.len != 0) raw else self.tree.string(t.value));
     }
 
     fn emit_jsx_spread_child(self: *Self, c: *const ast.JSXSpreadChild) Error!void {
@@ -2918,9 +3098,14 @@ fn fixedString(comptime tag: NodeTag) ?[]const u8 {
         .ts_object_keyword => "object",
         .ts_intrinsic_keyword => "intrinsic",
         .ts_jsdoc_unknown_type => "?",
-        .jsx_opening_fragment => "<>",
-        .jsx_closing_fragment => "</>",
         else => null,
+    };
+}
+
+fn emittedByParent(comptime tag: NodeTag) bool {
+    return switch (tag) {
+        .formal_parameters, .formal_parameter, .template_element => true,
+        else => false,
     };
 }
 
@@ -2972,6 +3157,16 @@ fn isNamed(tree: *const Tree, idx: NodeIndex, name: []const u8) bool {
     return std.mem.eql(u8, tree.string(id), name);
 }
 
+// an uninitialized `const` is ambient, as in a `.d.ts`
+fn isAmbient(tree: *const Tree, d: ast.VariableDeclaration) bool {
+    if (d.declare) return true;
+    if (d.kind != .@"const") return false;
+    for (tree.extra(d.declarators)) |x| {
+        if (tree.data(x).variable_declarator.init == .null) return true;
+    }
+    return false;
+}
+
 fn parameterOf(tree: *const Tree, idx: NodeIndex) NodeIndex {
     return switch (tree.data(idx)) {
         .formal_parameter => |p| p.pattern,
@@ -3021,6 +3216,25 @@ fn isBareInteger(text: []const u8) bool {
     if (text.len == 0 or !std.ascii.isDigit(text[0])) return false;
     for (text[1..]) |c| if (!std.ascii.isDigit(c) and c != '_') return false;
     return true;
+}
+
+fn needsSpaceBeforeInlineComment(last: u8) bool {
+    return switch (last) {
+        0, ' ', '\n', '(', '[', '{', '<' => false,
+        else => true,
+    };
+}
+
+fn strippedOperand(tree: *const Tree, idx: NodeIndex) NodeIndex {
+    return switch (tree.data(idx)) {
+        .ts_as_expression => |e| e.expression,
+        .ts_satisfies_expression => |e| e.expression,
+        .ts_non_null_expression => |e| e.expression,
+        .ts_instantiation_expression => |e| e.expression,
+        .ts_type_assertion => |e| e.expression,
+        .ts_parameter_property => |p| p.parameter,
+        else => unreachable,
+    };
 }
 
 fn hasLineTerminator(text: []const u8) bool {
@@ -3100,8 +3314,8 @@ comptime {
 }
 
 const node_precedence = blk: {
-    var table: [std.meta.fields(NodeTag).len]u8 = undefined;
-    for (std.enums.values(NodeTag)) |tag| table[@intFromEnum(tag)] = switch (tag) {
+    var table: [@typeInfo(NodeTag).@"enum".field_names.len]u8 = undefined;
+    for (std.enums.values(NodeTag)) |tag| table[@backingInt(tag)] = switch (tag) {
         .sequence_expression => Precedence.Comma,
         .assignment_expression,
         .arrow_function_expression,

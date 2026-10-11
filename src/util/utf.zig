@@ -1,4 +1,5 @@
 const std = @import("std");
+const xhtml_entities = @import("xhtml_entities.zig");
 
 pub const CodePoint = struct { len: u3, value: u21 };
 
@@ -166,6 +167,10 @@ pub fn decodeStringEscapes(
     out: *std.ArrayList(u8),
     alloc: std.mem.Allocator,
 ) error{OutOfMemory}!void {
+    const start = out.items.len;
+    defer if (std.mem.findScalarPos(u8, out.items, start, 0xED) != null) {
+        joinSurrogatePairs(out, start);
+    };
     var i: usize = 0;
     while (i < raw.len) {
         const run_start = i;
@@ -235,22 +240,8 @@ pub fn decodeStringEscapes(
             },
             'u' => {
                 if (parseUnicodeEscape(raw, i + 1)) |r| {
-                    var cp = r.value;
-                    var end = r.end;
-                    if (cp >= 0xD800 and cp <= 0xDBFF and
-                        end + 1 < raw.len and raw[end] == '\\' and raw[end + 1] == 'u')
-                    {
-                        if (parseUnicodeEscape(raw, end + 2)) |r2| {
-                            if (r2.value >= 0xDC00 and r2.value <= 0xDFFF) {
-                                cp = 0x10000 +
-                                    (@as(u21, cp) - 0xD800) * 0x400 +
-                                    (@as(u21, r2.value) - 0xDC00);
-                                end = r2.end;
-                            }
-                        }
-                    }
-                    try appendCodePoint(out, alloc, cp);
-                    i = end;
+                    try appendCodePoint(out, alloc, r.value);
+                    i = r.end;
                 } else {
                     try out.append(alloc, 'u');
                     i += 1;
@@ -274,13 +265,87 @@ pub fn decodeStringEscapes(
     }
 }
 
+/// Appends JSX text or a JSX attribute string to `out` with its entities decoded.
+pub fn decodeJsxEntities(
+    raw: []const u8,
+    out: *std.ArrayList(u8),
+    alloc: std.mem.Allocator,
+) error{OutOfMemory}!void {
+    var run_start: usize = 0;
+    var i: usize = 0;
+    while (std.mem.findScalarPos(u8, raw, i, '&')) |amp| {
+        const entity = jsxEntityAt(raw, amp) orelse {
+            i = amp + 1;
+            continue;
+        };
+        try out.appendSlice(alloc, raw[run_start..amp]);
+        try appendCodePoint(out, alloc, entity.value);
+        run_start = entity.end;
+        i = entity.end;
+    }
+    try out.appendSlice(alloc, raw[run_start..]);
+}
+
+const JsxEntity = struct { value: u21, end: usize };
+
+fn jsxEntityAt(raw: []const u8, amp: usize) ?JsxEntity {
+    std.debug.assert(raw[amp] == '&');
+    var i = amp + 1;
+    var value: u32 = 0;
+    if (i < raw.len and raw[i] == '#') {
+        i += 1;
+        const base: u8 = if (i < raw.len and raw[i] == 'x') 16 else 10;
+        if (base == 16) i += 1;
+        const digits = i;
+        while (i < raw.len) : (i += 1) {
+            const digit = std.fmt.charToDigit(raw[i], base) catch break;
+            // saturates past the last code point, which stays as written
+            value = @min(value * base + digit, 0x110000);
+        }
+        if (i == digits or value > 0x10FFFF) return null;
+    } else {
+        const name = i;
+        while (i < raw.len and std.ascii.isAlphanumeric(raw[i])) i += 1;
+        value = xhtml_entities.code_points.get(raw[name..i]) orelse return null;
+    }
+    if (i == raw.len or raw[i] != ';') return null;
+    return .{ .value = @intCast(value), .end = i + 1 };
+}
+
 /// Returns the code unit of a WTF-8 lone surrogate (`ED A0..BF 80..BF`) at `s[i]`, else
-/// null. These are the only sequences `codePointAt` rejects.
+/// null.
 pub fn loneSurrogateAt(s: []const u8, i: usize) ?u21 {
-    if (s[i] != 0xED or i + 2 >= s.len or s[i + 1] < 0xA0) return null;
+    if (s[i] != 0xED or i + 2 >= s.len) return null;
+    if (s[i + 1] < 0xA0 or s[i + 1] > 0xBF or s[i + 2] & 0xC0 != 0x80) return null;
     return (@as(u21, s[i] & 0x0F) << 12) |
         (@as(u21, s[i + 1] & 0x3F) << 6) |
         @as(u21, s[i + 2] & 0x3F);
+}
+
+// adjacent surrogates are one code point, escaped or not
+fn joinSurrogatePairs(out: *std.ArrayList(u8), start: usize) void {
+    const items = out.items;
+    var read = start;
+    var write = start;
+    while (read < items.len) {
+        if (pairAt(items, read)) |cp| {
+            write += std.unicode.utf8Encode(cp, items[write..][0..4]) catch unreachable;
+            read += 6;
+        } else {
+            items[write] = items[read];
+            write += 1;
+            read += 1;
+        }
+    }
+    out.shrinkRetainingCapacity(write);
+}
+
+fn pairAt(s: []const u8, i: usize) ?u21 {
+    const high = loneSurrogateAt(s, i) orelse return null;
+    if (high > 0xDBFF or i + 3 >= s.len) return null;
+    const low = loneSurrogateAt(s, i + 3) orelse return null;
+    if (low < 0xDC00) return null;
+    return 0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00);
 }
 
 /// Appends a code point as UTF-8, or as WTF-8 for a lone surrogate.
@@ -330,6 +395,15 @@ inline fn hexVal(c: u8) ?u8 {
 }
 
 const testing = std.testing;
+
+test "loneSurrogateAt reads only a well-formed surrogate" {
+    try std.testing.expectEqual(@as(?u21, 0xD83D), loneSurrogateAt("\xED\xA0\xBD", 0));
+    try std.testing.expectEqual(@as(?u21, 0xDFFF), loneSurrogateAt("\xED\xBF\xBF", 0));
+    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\x9F\xBF", 0));
+    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xF0\x9F\x98", 0));
+    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xA0\x41", 0));
+    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xA0", 0));
+}
 
 test "codePointAt ascii" {
     const s = "hello";
@@ -603,6 +677,14 @@ test "decodeStringEscapes braced unicode escapes" {
 test "decodeStringEscapes surrogate pairs" {
     // \uD83D\uDCA9 = U+1F4A9 (pile of poo)
     try expectDecode("\\uD83D\\uDCA9", "\xF0\x9F\x92\xA9");
+}
+
+test "decodeStringEscapes joins a surrogate pair however it is written" {
+    try expectDecode("\\uD83D\\\xED\xB0\x80", "\xF0\x9F\x90\x80");
+    try expectDecode("\xED\xA0\xBD\\uDC00", "\xF0\x9F\x90\x80");
+    try expectDecode("\\uD83D\\\n\\uDC00", "\xF0\x9F\x90\x80");
+    try expectDecode("\\u{D83D}\\u{DC00}", "\xF0\x9F\x90\x80");
+    try expectDecode("\\uDC00\\uD83D", "\xED\xB0\x80\xED\xA0\xBD");
 }
 
 test "decodeStringEscapes lone high surrogate" {

@@ -31,9 +31,9 @@ const corpus = [_]Case{
 
 // an unimplemented point can never be reached, so report that separately
 test "the reference binding implements every extension point" {
-    inline for (@typeInfo(Point).@"enum".fields) |field| {
-        if (!@hasDecl(binding, field.name)) {
-            std.debug.print("extension point has no reference hook: {s}\n", .{field.name});
+    inline for (@typeInfo(Point).@"enum".field_names) |name| {
+        if (!@hasDecl(binding, name)) {
+            std.debug.print("extension point has no reference hook: {s}\n", .{name});
             return error.ExtensionPointUnimplemented;
         }
     }
@@ -47,9 +47,9 @@ test "every extension point is reached through the public parse API" {
     }
 
     var unreached: u32 = 0;
-    inline for (@typeInfo(Point).@"enum".fields) |field| {
-        if (!visited(field.name)) {
-            std.debug.print("extension point never reached: {s}\n", .{field.name});
+    inline for (@typeInfo(Point).@"enum".field_names) |name| {
+        if (!visited(name)) {
+            std.debug.print("extension point never reached: {s}\n", .{name});
             unreached += 1;
         }
     }
@@ -165,7 +165,7 @@ fn visited(name: []const u8) bool {
 
 fn firstNode(tree: *const ast.Tree, tag: std.meta.Tag(ast.NodeData)) !ast.NodeIndex {
     for (0..tree.nodes.len) |i| {
-        const index: ast.NodeIndex = @enumFromInt(i);
+        const index: ast.NodeIndex = @fromBackingInt(@intCast(i));
         if (std.meta.activeTag(tree.data(index)) == tag) return index;
     }
     return error.NodeNotFound;
@@ -174,7 +174,7 @@ fn firstNode(tree: *const ast.Tree, tag: std.meta.Tag(ast.NodeData)) !ast.NodeIn
 fn countNodes(tree: *const ast.Tree, tag: std.meta.Tag(ast.NodeData)) usize {
     var found: usize = 0;
     for (0..tree.nodes.len) |i| {
-        if (std.meta.activeTag(tree.data(@enumFromInt(i))) == tag) found += 1;
+        if (std.meta.activeTag(tree.data(@fromBackingInt(@intCast(i)))) == tag) found += 1;
     }
     return found;
 }

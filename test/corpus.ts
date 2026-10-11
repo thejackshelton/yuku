@@ -20,63 +20,60 @@ export interface CorpusFile {
   sourceType: SourceType;
 }
 
-/** True when at least one corpus directory has been downloaded. */
 export function corpusPresent(): boolean {
   return CORPUS_DIRS.some((dir) => existsSync(dir));
 }
 
-/** Every corpus file under one directory, sorted by path for stable order. */
 export function corpusFilesUnder(dir: string): CorpusFile[] {
+  return filesUnder(dir, (path) => (path.includes(".module.") ? "module" : "script"));
+}
+
+function filesUnder(dir: string, sourceTypeOf: (path: string) => SourceType): CorpusFile[] {
   if (!existsSync(dir)) return [];
   const files: CorpusFile[] = [];
   for (const relative of new Glob(CORPUS_GLOB).scanSync({ cwd: dir })) {
     const path = join(dir, relative);
-    files.push({ path, relative, lang: langFromPath(path), sourceType: sourceTypeFromPath(path) });
+    files.push({ path, relative, lang: langFromPath(path), sourceType: sourceTypeOf(path) });
   }
   files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return files;
 }
 
-/** Every corpus file across all directories, with inferred language and type. */
 export function corpusFiles(): CorpusFile[] {
   return CORPUS_DIRS.flatMap(corpusFilesUnder);
 }
 
-/** A fetched project and its source files, see `test/projects/manifest.ts`. */
 export interface LoadedProject {
   project: Project;
   root: string;
   files: CorpusFile[];
 }
 
-/** Every project fetched by `test/projects/load.ts`. */
 export function loadedProjects(): LoadedProject[] {
   const loaded: LoadedProject[] = [];
   for (const project of PROJECTS) {
     const root = join(PROJECTS_DIR, project.name);
     if (!existsSync(root)) continue;
     const excluded = (project.exclude ?? []).map((path) => join(root, path) + sep);
+    const sourceTypeOf = (path: string): SourceType =>
+      project.type === "commonjs" && path.endsWith(".js") ? "commonjs" : sourceTypeFromPath(path);
     const files = project.sources
-      .flatMap((source) => corpusFilesUnder(join(root, source)))
+      .flatMap((source) => filesUnder(join(root, source), sourceTypeOf))
       .filter((file) => !excluded.some((path) => file.path.startsWith(path)));
     loaded.push({ project, root, files });
   }
   return loaded;
 }
 
-/** The source files of every fetched project. */
 export function projectFiles(): CorpusFile[] {
   return loadedProjects().flatMap((loaded) => loaded.files);
 }
 
-/**
- * Runs `fn` over every corpus file, reading sources in batches so thousands of
- * files do not open at once.
- */
+// batched, so thousands of files never open at once
 export async function forEachCorpusFile(
   fn: (file: CorpusFile, source: string) => void,
+  files: CorpusFile[] = corpusFiles(),
 ): Promise<void> {
-  const files = corpusFiles();
   for (let i = 0; i < files.length; i += BATCH_SIZE) {
     const batch = files.slice(i, i + BATCH_SIZE);
     await Promise.all(batch.map(async (file) => fn(file, await Bun.file(file.path).text())));

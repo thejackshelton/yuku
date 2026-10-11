@@ -1,18 +1,16 @@
-// Codegen invariants over the whole corpus, checked per plan.
-//
-//   reparse   every plan's output parses cleanly again
-//   verbatim  print and compact reparse to the original AST modulo spans. strip and
-//             minify rewrite the tree by design
-//   fixed     every plan is a fixed point on its own output. comment-free code is
-//             reproduced byte for byte, and no comment is lost or duplicated
-//
-// Skips when the corpus has not been downloaded so a bare `bun test` stays green.
+// every plan reparses, keeps each comment, and is idempotent, and print and compact keep the AST
 
 import { beforeAll, describe, expect, test } from "bun:test";
 import { parse, type ParseOptions, type SourceLang } from "yuku-parser";
 import { generate, type GenerateOptions } from "yuku-codegen";
 import { astDiffPath } from "../ast-helpers-for-test";
-import { corpusPresent, forEachCorpusFile, type CorpusFile } from "../corpus";
+import {
+  corpusFiles,
+  corpusPresent,
+  forEachCorpusFile,
+  projectFiles,
+  type CorpusFile,
+} from "../corpus";
 
 type Plan = "print" | "compact" | "strip" | "minify";
 
@@ -41,7 +39,6 @@ function checkFile(file: CorpusFile, source: string): void {
     preserveParens: false,
   };
   const ast = parse(source, parseOptions);
-  // parse failures are a parser concern, caught elsewhere
   if (ast.diagnostics.length > 0) return;
   checked++;
 
@@ -58,6 +55,12 @@ function checkFile(file: CorpusFile, source: string): void {
     const reparsed = parse(code, reparseOptions);
     if (reparsed.diagnostics.length > 0) {
       note(plan, `${file.path}: reparse failed`);
+      continue;
+    }
+
+    const typed = file.lang !== "js" && file.lang !== "jsx";
+    if (!(plan === "strip" && typed) && commentKey(ast) !== commentKey(reparsed)) {
+      note(plan, `${file.path}: comment lost or duplicated`);
       continue;
     }
 
@@ -78,8 +81,6 @@ function checkFile(file: CorpusFile, source: string): void {
     }
     if (second === code) continue;
 
-    // a comment may move, but comment-free code is a fixed point and no comment is lost or
-    // duplicated
     const reparsedTwice = parse(second, reparseOptions);
     const bare = { ...options, comments: false as const };
     if (generate(reparsed.program, bare).code !== generate(reparsedTwice.program, bare).code) {
@@ -90,7 +91,7 @@ function checkFile(file: CorpusFile, source: string): void {
   }
 }
 
-// sorted and trimmed, so moving or re-indenting a comment keeps the key
+// a moved or re-indented comment keeps its key
 function commentKey(result: { comments?: { type: string; value: string }[] }): string {
   const normalize = (value: string) =>
     value
@@ -112,7 +113,7 @@ function stripLang(lang: SourceLang): SourceLang {
 
 describe.skipIf(!corpusPresent())("codegen corpus invariants", () => {
   beforeAll(async () => {
-    await forEachCorpusFile((file, source) => checkFile(file, source));
+    await forEachCorpusFile(checkFile, [...corpusFiles(), ...projectFiles()]);
   }, 300_000);
 
   test("the corpus is non-empty", () => {

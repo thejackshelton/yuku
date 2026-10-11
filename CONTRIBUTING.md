@@ -5,7 +5,7 @@ code generator with source maps, and a semantic analyzer.
 
 ## Set up
 
-You need [Zig](https://ziglang.org/) 0.16 and [Bun](https://bun.sh/).
+You need [Zig](https://ziglang.org/) 0.17 and [Bun](https://bun.sh/).
 
 ```bash
 git clone https://github.com/yuku-toolchain/yuku.git
@@ -88,5 +88,5 @@ Then open http://localhost:1990. When you're done, run `bun run docs:llms`.
 ## Open a pull request
 
 Run `bun run format` and `bun run test`, then open your PR. Title it like a
-commit subject, `area: what changed`, for example
-`parser: accept legal line breaks in TypeScript declarations`.
+commit subject, lowercase and imperative with no area prefix, for example
+`accept legal line breaks in TypeScript declarations`.

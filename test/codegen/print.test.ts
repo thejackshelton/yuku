@@ -81,16 +81,16 @@ test("template raw text is preserved", () => {
     `);
 });
 
-test("a JSX attribute keeps its raw text", () => {
+test("JSX text and attributes keep their raw text", () => {
   expect(
     gen(
-      `const a = <a href="&amp;x" title='y' />;\nconst b = <b data-x={"&lt;"} />;`,
+      `const a = <a href="&amp;x" title='y' />;\nconst b = <b data-x={"&lt;"}>&lt;b&gt;</b>;`,
       {},
       "input.jsx",
     ),
   ).toMatchInlineSnapshot(`
       "const a = <a href="&amp;x" title='y' />;
-      const b = <b data-x={"&lt;"} />;"
+      const b = <b data-x={"&lt;"}>&lt;b&gt;</b>;"
     `);
 });
 
@@ -269,4 +269,32 @@ test("line breaks in template text and JSDoc print as LF", () => {
      */
     function f() {}"
   `);
+});
+
+test("decorators print on the side of `export` they were written on", () => {
+  const source = [
+    "@a export class A {}",
+    "@b export default class B {}",
+    "export @c class C {}",
+    "export default @d class D {}",
+  ].join("\n");
+  expect(gen(source)).toMatchInlineSnapshot(`
+    "@a
+    export class A {}
+    @b
+    export default class B {}
+    export @c
+    class C {}
+    export default @d
+    class D {}"
+  `);
+  expect(gen(source, { format: "compact" })).toMatchInlineSnapshot(
+    `"@a export class A{}@b export default class B{}export@c class C{}export default@d class D{}"`,
+  );
+});
+
+test("a hashbang is reprinted verbatim", () => {
+  expect(gen("#!/usr/bin/env node --flag \nx;", { format: "compact" }, "input.js")).toBe(
+    "#!/usr/bin/env node --flag \nx",
+  );
 });

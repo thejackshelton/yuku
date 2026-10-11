@@ -1,11 +1,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { Analyzer, BindingFlags, type Module } from "yuku-analyzer";
-import type { Node } from "yuku-parser";
-import { corpusPresent, forEachCorpusFile } from "../corpus";
+import type { Node, SourceType } from "yuku-parser";
+import { corpusFiles, corpusPresent, forEachCorpusFile, projectFiles } from "../corpus";
 
 const SAMPLE_MAX = 8;
 
-// one list per invariant, a check pushes a `path: detail` line on violation
 const violations = {
   crashed: [] as string[],
   crossIndex: [] as string[],
@@ -53,10 +52,10 @@ function fingerprint(module: Module): string {
   ]);
 }
 
-function check(path: string, source: string): void {
+function check(path: string, source: string, sourceType: SourceType): void {
   let module: Module;
   try {
-    module = new Analyzer().setFile(path, source);
+    module = new Analyzer().setFile(path, source, { sourceType });
     // a decode fault throws here, not later
     void module.ast;
     void module.scopes;
@@ -176,7 +175,8 @@ function check(path: string, source: string): void {
     let native: Set<number>;
     try {
       native = new Set(module.capturesOf(fn).map((c) => c.binding.id));
-    } catch {
+    } catch (error) {
+      note(violations.crashed, `${path}: capturesOf: ${(error as Error).message}`);
       continue;
     }
     const expected = expectedCaptures(module, fn);
@@ -201,7 +201,7 @@ function check(path: string, source: string): void {
   }
 
   // a second analysis yields an identical model
-  const again = new Analyzer().setFile(path, source);
+  const again = new Analyzer().setFile(path, source, { sourceType });
   if (fingerprint(module) !== fingerprint(again)) {
     note(violations.determinism, `${path}: non-deterministic`);
   }
@@ -209,7 +209,10 @@ function check(path: string, source: string): void {
 
 describe.skipIf(!corpusPresent())("analyzer corpus invariants", () => {
   beforeAll(async () => {
-    await forEachCorpusFile((file, source) => check(file.path, source));
+    await forEachCorpusFile(
+      (file, source) => check(file.path, source, file.sourceType),
+      [...corpusFiles(), ...projectFiles()],
+    );
   }, 300_000);
 
   test("the corpus is non-empty", () => {

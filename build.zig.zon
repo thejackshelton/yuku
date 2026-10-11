@@ -1,14 +1,14 @@
 .{
     .name = .yuku,
-    .version = "0.17.0",
+    .version = "0.18.1",
     .dependencies = .{
         .napi_zig = .{
-            .url = "git+https://github.com/yuku-toolchain/napi-zig?ref=v0.3.1#1032d3e9da30bd0e8ab895886cb862d45fb56230",
-            .hash = "napi_zig-0.2.0-XRkY0XcYAgDV-EwyPZo287cfJkKZaES9crzUCRoqcQ09",
+            .url = "git+https://github.com/yuku-toolchain/napi-zig?ref=main#2ef8928d9cdf70af1cc6b17928f506c0a5ca0076",
+            .hash = "napi_zig-0.2.0-XRkY0UsWAgAqaAoq4Zx7sCD39BNi-Uiq0uMS8sIX_ZUZ",
         },
     },
     .fingerprint = 0xc32fad6e9edaaa9b, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
