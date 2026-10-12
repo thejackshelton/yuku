@@ -70,7 +70,9 @@ pub inline fn at(comptime point: Point, args: anytype) Return(point) {
     return @call(.auto, hook, .{Return(point)} ++ args);
 }
 
-inline fn bound(comptime point: Point) bool {
+/// Whether a hook is bound at `point`. A call site that runs its own test before `at` puts
+/// that test behind `bound`, so an unbound point leaves no code in the parser.
+pub inline fn bound(comptime point: Point) bool {
     return @hasDecl(binding, @tagName(point));
 }
 
