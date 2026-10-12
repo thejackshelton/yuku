@@ -310,18 +310,20 @@ pub const Parser = struct {
         self.lexer.mode = mode;
     }
 
-    /// Parses the TypeScript annotation at the current `:` and attaches it to `pattern`, as
-    /// a declaration does. An extension that reads its own bindings calls it to type them.
-    pub fn parseTypeAnnotation(self: *Parser, pattern: ast.NodeIndex) Error!?ast.NodeIndex {
+    pub fn extensionParseTypeAnnotation(
+        self: *Parser,
+        pattern: ast.NodeIndex,
+    ) Error!?ast.NodeIndex {
         std.debug.assert(self.tree.isTs());
         std.debug.assert(pattern != .null);
         std.debug.assert(self.current_token.tag == .colon);
+        const start = self.tree.span(pattern).start;
 
-        const annotation = try ts_types.parseTypeAnnotation(self) orelse return null;
-        ts_types.applyTypeAnnotationToPattern(self, pattern, annotation);
+        const typed = try ts_types.parsePatternTypeAnnotation(self, pattern) orelse return null;
 
-        std.debug.assert(self.tree.span(pattern).end == self.tree.span(annotation).end);
-        return annotation;
+        std.debug.assert(@backingInt(typed) + 1 == self.tree.nodes.len);
+        std.debug.assert(self.tree.span(typed).start == start);
+        return typed;
     }
 
     pub fn flushToExtras(

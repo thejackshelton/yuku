@@ -15,16 +15,17 @@ pub fn at_expression(comptime R: type, parser: anytype) R {
 pub fn at_statement(comptime R: type, parser: anytype) R {
     visit("at_statement");
     const start = parser.current_token.span.start;
-    if (!std.mem.startsWith(u8, parser.source[parser.current_token.span.end..], "typed ")) return null;
+    const after = parser.current_token.span.end;
+    if (!std.mem.startsWith(u8, parser.source[after..], "typed ")) return null;
     try parser.advance() orelse return .failed;
     try parser.advance() orelse return .failed;
 
     const name = parser.current_token.span;
-    const id = try parser.tree.addNode(.{ .binding_identifier = .{
+    const untyped = try parser.tree.addNode(.{ .binding_identifier = .{
         .name = parser.tree.sourceSlice(name.start, name.end),
     } }, name);
     try parser.advance() orelse return .failed;
-    _ = try parser.parseTypeAnnotation(id) orelse return .failed;
+    const id = try parser.extensionParseTypeAnnotation(untyped) orelse return .failed;
 
     const declarator = try parser.tree.addNode(
         .{ .variable_declarator = .{ .id = id, .init = .null } },

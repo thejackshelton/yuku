@@ -319,7 +319,6 @@ fn parseJsxChildren(parser: *Parser, gt_end: u32) Error!?ast.IndexRange {
     while (true) {
         var text_token = parser.lexer.reScanJsxText(scan_from);
 
-        // a child the extension reads inside the text, such as a comment, ends the text there
         var inner: ast.NodeIndex = .null;
         if (try extension.at(.jsx_text_child, .{ parser, text_token.span })) |outcome| {
             inner = outcome.node orelse return null;
