@@ -40,34 +40,33 @@ Each package documents its API in its README.
 
 The core, Yuku's compiled code, is shared by every package, so it downloads once however many you install. `yuku-parser` and `yuku-analyzer` together install 907 kB, against 1.58 MB with a binary each. Toolchains with a binary per tool repeat the parser in every one, so the gap widens with each tool Yuku adds. Future tools, such as the transformer, use the core's parser instead of their own.
 
-### [WebAssembly]($section.id('webassembly'))
-
-The core comes in two builds with the same API and byte-identical results. The native core is the fastest and the default, installed for your platform with no setup.
-
-The WebAssembly core runs anywhere: browsers, edge runtimes, and platforms without a native build. Install [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm), load it once, and pass it to every package that takes one.
-
-```js
-import { load } from "@yuku-core/wasm";
-import { parse } from "yuku-parser";
-
-const core = await load();
-
-parse("const x = 1;", { core });
-```
-
-To choose the native core explicitly, load it from `yuku-core` the same way.
-
-For runtimes that import `.wasm` files as compiled modules, such as Cloudflare Workers, use `loadSync`.
-
-```js
-import { loadSync } from "@yuku-core/wasm";
-import wasm from "@yuku-core/wasm/yuku-core.wasm";
-import { parse } from "yuku-parser";
-
-const core = loadSync(wasm);
-
-parse("const x = 1;", { core });
-```
+># [WebAssembly]($block.collapsible(false))
+>The core comes in two builds with the same API and byte-identical results. The native core is the fastest and the default, installed for your platform with no setup.
+>
+>The WebAssembly core runs anywhere: browsers, edge runtimes, and platforms without a native build. Install [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm), load it once, and pass it to every package that takes one.
+>
+>```js
+>import { load } from "@yuku-core/wasm";
+>import { parse } from "yuku-parser";
+>
+>const core = await load();
+>
+>parse("const x = 1;", { core });
+>```
+>
+>To choose the native core explicitly, load it from `yuku-core` the same way.
+>
+>For runtimes that import `.wasm` files as compiled modules, such as Cloudflare Workers, use `loadSync`.
+>
+>```js
+>import { loadSync } from "@yuku-core/wasm";
+>import wasm from "@yuku-core/wasm/yuku-core.wasm";
+>import { parse } from "yuku-parser";
+>
+>const core = loadSync(wasm);
+>
+>parse("const x = 1;", { core });
+>```
 
 ### [Zig]($section.id('zig'))
 

@@ -1,6 +1,6 @@
 {
   "name": "@yuku-core/binding-win32-arm64",
-  "version": "0.18.1",
+  "version": "0.19.0",
   "license": "MIT",
   "os": [
     "win32"

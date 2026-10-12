@@ -2,6 +2,17 @@
 
 What changed in each release of Yuku, newest first. Releases up to 0.14.0 are listed on [GitHub](https://github.com/yuku-toolchain/yuku/releases).
 
+## 0.19.0
+
+### Breaking
+
+- Using Yuku as a Zig package now needs Zig 0.17.0 or later, so upgrade Zig before you update (#242 by @arshad-yaseen)
+
+### Changes
+
+- `generate` in `yuku-codegen` prints any single node, such as an object property, not only a whole `Program` (#245 by @arshad-yaseen)
+- `@yuku-core/wasm` parses an empty source correctly in runtimes like WebContainers, where it could read leftover bytes as input (#246 by @arshad-yaseen)
+
 ## 0.18.1
 
 ### Changes

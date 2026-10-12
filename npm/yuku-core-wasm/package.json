@@ -1,6 +1,6 @@
 {
   "name": "@yuku-core/wasm",
-  "version": "0.18.1",
+  "version": "0.19.0",
   "description": "Yuku's WebAssembly core, for browsers, edge runtimes, and platforms without a native build",
   "license": "MIT",
   "repository": {
