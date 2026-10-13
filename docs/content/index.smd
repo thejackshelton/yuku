@@ -42,7 +42,7 @@ npm install yuku
 | [`yuku/codegen`](/parser/codegen/#javascript)   | Print an AST back to source, with source maps     |
 | [`yuku/types`](/parser/ast/#javascript)         | TypeScript types for the AST                      |
 
-It runs in Node.js 18 or newer, Bun, Deno, Workers, and browsers.
+It runs in Node.js 14.18 or newer, Bun, Deno, Workers, and browsers.
 
 ### [Zig]($section.id('zig'))
 

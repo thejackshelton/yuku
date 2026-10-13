@@ -14,7 +14,7 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=14.18.0"
   },
   "scripts": {
     "test": "bun fetch:fixtures && bun run build && bun typecheck && bun test:parser && bun test:codegen && bun test:ast && bun test:analyzer && bun test:dialect && bun test:sourcemap && bun test:runtime",
