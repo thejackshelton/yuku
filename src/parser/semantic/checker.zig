@@ -178,10 +178,7 @@ pub const Checker = struct {
                     // https://tc39.es/ecma262/#sec-variablestatements-in-catch-blocks
                     if (existing.flags.catch_var) {
                         const catch_node = ctx.scope.get(scope_id).node;
-                        const param = ctx.tree.data(catch_node).catch_clause.param;
-                        const simple_param = param != .null and
-                            ctx.tree.data(param) == .binding_identifier;
-                        if (!simple_param) {
+                        if (!hasSimpleCatchParameters(ctx.tree, catch_node)) {
                             try self.reportRedeclaration(name, node_index, sym, ctx);
                             break;
                         }
@@ -1585,3 +1582,23 @@ pub const Checker = struct {
         return self.allocator.print(format, args);
     }
 };
+
+// whether a catch clause, or a dialect node that binds like one, takes only identifiers
+fn hasSimpleCatchParameters(tree: *const ast.Tree, node: ast.NodeIndex) bool {
+    switch (tree.data(node)) {
+        .catch_clause => |clause| {
+            return clause.param != .null and tree.data(clause.param) == .binding_identifier;
+        },
+        .dialect => |dialect_node| {
+            for (tree.extra(dialect_node.children)) |child| {
+                if (child == .null) continue;
+                switch (tree.data(child)) {
+                    .array_pattern, .object_pattern, .assignment_pattern => return false,
+                    else => {},
+                }
+            }
+            return true;
+        },
+        else => unreachable,
+    }
+}

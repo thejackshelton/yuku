@@ -38,18 +38,25 @@ pub fn parseClassDecorated(
 ) Error!?ast.NodeIndex {
     std.debug.assert(start_from_param != null or
         parser.current_token.tag == .class or
-        parser.current_token.tag == .abstract);
+        parser.current_token.tag == .abstract or
+        parser.current_token.tag == .declare);
     const start = start_from_param orelse parser.current_token.span.start;
     const is_ts = parser.tree.isTs();
 
+    // the modifiers after decorators or `export default`, as in `@dec abstract declare class`
     var is_abstract = options.is_abstract;
-    if (parser.current_token.tag == .abstract and
-        !is_abstract and !options.is_expression and
-        is_ts and isAbstractClassNext(parser))
-    {
-        is_abstract = true;
-        try parser.advance() orelse return null; // consume 'abstract'
+    var is_declare = options.is_declare;
+    if (is_ts and !options.is_expression and isClassModifiersNext(parser)) {
+        while (parser.current_token.tag != .class) {
+            std.debug.assert(parser.current_token.tag == .abstract or
+                parser.current_token.tag == .declare);
+            if (parser.current_token.tag == .abstract) is_abstract = true else is_declare = true;
+            try parser.advance() orelse return null;
+        }
     }
+    const saved_ambient = parser.ts_context.ambient;
+    defer parser.ts_context.ambient = saved_ambient;
+    if (is_declare) parser.ts_context.ambient = true;
 
     if (!try parser.expect(.class, "Expected 'class' keyword", null)) return null;
 
@@ -123,9 +130,37 @@ pub fn parseClassDecorated(
         .type_parameters = type_parameters,
         .super_type_arguments = super_type_arguments,
         .implements = implements,
-        .declare = options.is_declare,
+        .declare = is_declare,
         .abstract = is_abstract,
     } }, .{ .start = start, .end = parser.tree.span(body).end });
+}
+
+/// Returns whether `declare` and `abstract`, each at most once and in either order, then
+/// `class` follow on one line.
+pub fn isClassModifiersNext(parser: *Parser) bool {
+    var peek = parser.beginPeek();
+    defer peek.end();
+
+    var seen_declare = false;
+    var seen_abstract = false;
+    var token = parser.current_token;
+    // each modifier at most once bounds the loop
+    while (true) {
+        switch (token.tag) {
+            .declare => {
+                if (seen_declare) return false;
+                seen_declare = true;
+            },
+            .abstract => {
+                if (seen_abstract) return false;
+                seen_abstract = true;
+            },
+            .class => return seen_declare or seen_abstract,
+            else => return false,
+        }
+        token = peek.next();
+        if (token.hasLineTerminatorBefore()) return false;
+    }
 }
 
 /// Returns whether the current `abstract` modifies a `class` on the same line.

@@ -844,13 +844,23 @@ pub const SymbolTracker = struct {
                 };
             },
 
-            .dialect => |node| if (dialect.shape(node.kind).lexical_bindings) {
-                try self.pushSavedContext();
-                self.pending = .{
-                    .flags = .{ .block_scoped_var = true },
-                    .excludes = Symbol.Excludes.block_scoped_var.merge(self.excluded_imports),
-                    .scope = scope.current,
-                };
+            .dialect => |node| {
+                const shape = dialect.shape(node.kind);
+                if (shape.lexical_bindings) {
+                    try self.pushSavedContext();
+                    self.pending = .{
+                        .flags = .{ .block_scoped_var = true },
+                        .excludes = Symbol.Excludes.block_scoped_var.merge(self.excluded_imports),
+                        .scope = scope.current,
+                    };
+                } else if (shape.catch_bindings) {
+                    try self.pushSavedContext();
+                    self.pending = .{
+                        .flags = .{ .function_scoped_var = true, .catch_var = true },
+                        .excludes = Symbol.Excludes.catch_var,
+                        .scope = scope.current,
+                    };
+                }
             },
 
             // the id binds outside the scope the tracker pushed for the body
@@ -1180,8 +1190,9 @@ pub const SymbolTracker = struct {
 
             .export_named_declaration, .export_default_declaration => self.export_state = .none,
 
-            .dialect => |node| if (dialect.shape(node.kind).lexical_bindings) {
-                self.popSavedContext();
+            .dialect => |node| {
+                const shape = dialect.shape(node.kind);
+                if (shape.lexical_bindings or shape.catch_bindings) self.popSavedContext();
             },
 
             else => {},

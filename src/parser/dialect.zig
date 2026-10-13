@@ -45,6 +45,11 @@ pub const Shape = struct {
     block_scope: bool = false,
     /// A binding identifier inside the node declares a `let`-like binding.
     lexical_bindings: bool = false,
+    /// A binding identifier inside the node declares a catch parameter, which a `var` in the
+    /// node may redeclare while every parameter is an identifier, as in `catch (e) { var e }`.
+    catch_bindings: bool = false,
+    /// The node repeats its body, which `break` and `continue` in it end or skip, as a loop's.
+    iteration: bool = false,
 };
 
 /// A kind of file the dialect parses, listed in its `files`.

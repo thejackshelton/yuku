@@ -271,6 +271,16 @@ fn jsxNamesMatch(parser: *const Parser, opening: ast.NodeIndex, closing: ast.Nod
             a = x.object;
             b = y.object;
         },
+        // a dialect's `<{tag}>`, named by the expression without the comments around it
+        .jsx_expression_container => |x| {
+            if (tree.data(b) != .jsx_expression_container) return false;
+            const y = tree.data(b).jsx_expression_container;
+            return std.mem.eql(
+                u8,
+                parser.spanText(tree.span(x.expression)),
+                parser.spanText(tree.span(y.expression)),
+            );
+        },
         else => return std.mem.eql(
             u8,
             parser.spanText(tree.span(a)),

@@ -40,6 +40,12 @@ pub fn isStartOfTsDeclaration(parser: *Parser) bool {
     if (token.tag == .abstract) {
         token = peek.next();
         if (token.hasLineTerminatorBefore()) return false;
+        // `abstract declare class` as well as `declare abstract class`
+        if (token.tag == .declare and !has_declare) {
+            token = peek.next();
+            if (token.hasLineTerminatorBefore()) return false;
+            has_declare = true;
+        }
         if (token.tag != .class) return false;
         has_abstract = true;
     }
@@ -95,6 +101,10 @@ pub fn parseTsDeclaration(parser: *Parser) Error!?ast.NodeIndex {
     if (parser.current_token.tag == .abstract) {
         modifiers.abstract = true;
         try parser.advance() orelse return null;
+        if (parser.current_token.tag == .declare and !modifiers.declare) {
+            modifiers.declare = true;
+            try parser.advance() orelse return null;
+        }
     }
     if (parser.current_token.tag == .@"const") {
         if (isConstEnumHead(parser.peekAhead())) {

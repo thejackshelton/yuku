@@ -39,7 +39,7 @@ pub fn parseImportDeclarationFrom(parser: *Parser, start: u32) Error!?ast.NodeIn
         isTypeImportModifier(parser, next))
     {
         import_kind = .type;
-        try parser.advance() orelse return null;
+        try parser.advanceWithoutEscapeCheck() orelse return null;
     }
     // before the phase forms so `import source = require("m")` binds `source`
     if (is_ts and parser.current_token.tag.isIdentifierLike()) {
@@ -504,6 +504,18 @@ fn parseExportDefaultPart(parser: *Parser) Error!?DefaultExportPart {
     }
 
     if (tag == .at) {
+        if (comptime dialect.has(.expression)) {
+            if (try dialect.at(.expression, parser, .{})) |claimed| {
+                const first = claimed orelse return null;
+                const expression = try expressions.parseExpressionFrom(
+                    parser,
+                    first,
+                    Precedence.Assignment,
+                    .{},
+                ) orelse return null;
+                return .{ .declaration = expression, .needs_semicolon = true };
+            }
+        }
         const decorators_start = parser.current_token.span.start;
         const decorators = try decorator.parseDecorators(parser) orelse return null;
         const declaration = try class.parseClassDecorated(
@@ -724,7 +736,9 @@ pub fn parseExportDecorated(parser: *Parser, decorators: ast.IndexRange) Error!?
         break :blk all;
     } else decorators;
 
-    if (parser.current_token.tag != .class and parser.current_token.tag != .abstract) {
+    if (parser.current_token.tag != .class and
+        !(parser.tree.isTs() and class.isClassModifiersNext(parser)))
+    {
         try parser.reportExpected(parser.current_token.span, "Expected 'class' keyword", .{});
         return null;
     }

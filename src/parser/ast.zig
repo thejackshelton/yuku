@@ -2542,6 +2542,7 @@ pub const NodeData = union(enum) {
             .while_statement,
             .do_while_statement,
             => true,
+            .dialect => |node| @import("dialect.zig").shape(node.kind).iteration,
             else => false,
         };
     }

@@ -32,7 +32,18 @@ pub fn parseExpression(
     min_precedence: u8,
     options: ParseExpressionOptions,
 ) Error!?ast.NodeIndex {
-    var left = try parsePrefix(parser, min_precedence) orelse return null;
+    const first = try parsePrefix(parser, min_precedence) orelse return null;
+    return parseExpressionFrom(parser, first, min_precedence, options);
+}
+
+/// Continues an expression from its first operand, already parsed.
+pub inline fn parseExpressionFrom(
+    parser: *Parser,
+    first: ast.NodeIndex,
+    min_precedence: u8,
+    options: ParseExpressionOptions,
+) Error!?ast.NodeIndex {
+    var left = first;
     const is_ts = parser.tree.isTs();
 
     while (true) {
