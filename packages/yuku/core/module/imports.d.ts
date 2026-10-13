@@ -1,3 +1,7 @@
+declare module "#module" {
+  export const yuku: WebAssembly.Module;
+}
+
 declare module "#wasm" {
   const module: WebAssembly.Module;
   export default module;
