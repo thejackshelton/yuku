@@ -60,8 +60,7 @@ parse(source, { path: "src/app.tsx" });
 | `semanticErrors` | `true`, `false`                           | `false`    | Also report the early errors that need scopes, such as redeclarations and `break` outside a loop.  |
 | `attachComments` | `true`, `false`                           | `false`    | Also attach each comment to its node. See [Comments](#comments).                                   |
 | `tokens`         | `true`, `false`                           | `false`    | Keep every token. See [Tokens](#tokens).                                                           |
-| `dialect`        | `true`, `false`                           | `false`    | Read the source with the [dialect](https://yuku.fyi/parser/dialect/#javascript) built into `wasm`. |
-| `wasm`           | a `WebAssembly.Module`                    | its own    | The build of Yuku that parses, one with a dialect compiled in.                                     |
+| `wasm`           | a `WebAssembly.Module`                    | its own    | The build of Yuku that parses, one with a [dialect](https://yuku.fyi/parser/dialect/#javascript).  |
 
 An unknown `lang` or `sourceType` throws a `TypeError`. `langFromPath(path)` and `sourceTypeFromPath(path)` return the values a path implies.
 

@@ -8,5 +8,5 @@ const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 export function parse(source, options = {}) {
   const text = typeof source === "string" ? source : utf8.decode(source);
-  return decode(run("parse", text, options), text, options.path ?? null);
+  return run("parse", text, options, decode);
 }

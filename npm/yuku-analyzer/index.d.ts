@@ -28,7 +28,8 @@ interface AnalyzeOptions extends FileOptions, ParseOptions, Pick<AnalyzerOptions
 
 interface AnalyzerOptions {
   /**
-   * The build of Yuku that analyzes, one with a dialect compiled in.
+   * The build of Yuku that analyzes, such as one with a dialect compiled in. See
+   * https://yuku.fyi/parser/dialect/#javascript.
    * @default the module yuku-parser ships
    */
   wasm?: WebAssembly.Module;

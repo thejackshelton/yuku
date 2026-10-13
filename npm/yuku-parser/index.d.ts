@@ -14,7 +14,8 @@ export * from "@yuku-toolchain/types";
 
 interface ParseOptions extends FileOptions {
   /**
-   * The build of Yuku that parses, one with a dialect compiled in.
+   * The build of Yuku that parses, such as one with a dialect compiled in. See
+   * https://yuku.fyi/parser/dialect/#javascript.
    * @default the module yuku-parser ships
    */
   wasm?: WebAssembly.Module;

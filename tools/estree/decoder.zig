@@ -262,25 +262,9 @@ fn writeTokenList(w: *Writer) !void {
     });
 }
 
-// a dialect node decodes in the shape its dialect declares, and its child keys join the
-// registry yuku-ast walks by, alongside the keys of a standard type of the same name
+// a dialect node decodes in the shape its dialect declares
 fn writeShaped(w: *Writer) !void {
     try w.writeAll(
-        \\const _childKeys = globalThis[Symbol.for("yuku.childKeys")] ||
-        \\  (globalThis[Symbol.for("yuku.childKeys")] = Object.create(null));
-        \\let _shapesJson = "", _shapesList = null;
-        \\function shapesOf(json) {
-        \\  if (json !== _shapesJson) {
-        \\    _shapesList = JSON.parse(json);
-        \\    for (const shape of _shapesList) {
-        \\      const keys = _childKeys[shape.type];
-        \\      if (keys === undefined) _childKeys[shape.type] = shape.fields;
-        \\      else for (const field of shape.fields) if (!keys.includes(field)) keys.push(field);
-        \\    }
-        \\    _shapesJson = json;
-        \\  }
-        \\  return _shapesList;
-        \\}
         \\function shaped(shape, start, end, children) {
         \\  const node = Object.assign({ type: shape.type, start, end }, shape.properties);
         \\  const fields = shape.fields, list = shape.list, extra = children.length - fields.length;
@@ -336,7 +320,7 @@ fn writeBuildPosMap(w: *Writer) !void {
 
 fn writeDecodeOpen(w: *Writer) !void {
     try w.print(
-        \\function decode(buffer, source, path) {{
+        \\function decode(buffer, source, path, shapes) {{
         \\  const _u8 = new Uint8Array(buffer);
         \\  const _u32 = new Int32Array(buffer, 0, buffer.byteLength >> 2);
         \\  const _src = source;
@@ -403,12 +387,6 @@ fn writeDecodeOpen(w: *Writer) !void {
         \\    const m = _posMap();
         \\    return _src.slice(s < _firstNa ? s : m[s - _firstNa], m[e - _firstNa]);
         \\  }};
-        \\  let _shapes = null;
-        \\  function shape(kind) {{
-        \\    const end = _srcLen + spLen;
-        \\    if (_shapes === null) _shapes = shapesOf(str(end - _u32[{[u_shl]d}], end));
-        \\    return _shapes[kind];
-        \\  }}
         \\  function nodeArr(s, len, depth) {{
         \\    const r = new Array(len);
         \\    const base = _extraBase + s;
@@ -447,7 +425,6 @@ fn writeDecodeOpen(w: *Writer) !void {
         .u_tc = rt.HDR_TOKEN_COUNT_U32,
         .u_fl = rt.HDR_FLAGS_U32,
         .u_fna = rt.HDR_FIRST_NON_ASCII_U32,
-        .u_shl = rt.HDR_SHAPES_LEN_U32,
         .ts = rt.FLAG_TS,
         .ac = rt.FLAG_ATTACHED_COMMENTS,
         .hdr = rt.HEADER_SIZE,
@@ -842,7 +819,7 @@ fn writeNodeCases(w: *Writer, mode: Mode) !void {
     inline for (node_data.field_names, node_data.field_types, 0..) |node_name, Payload, tag| {
         var body_w: Writer = .fixed(&body_buf);
         if (comptime std.mem.eql(u8, node_name, "dialect")) {
-            try body_w.writeAll("return shaped(shape(flags), start, end, nodeArrHoles(f1, f2));");
+            try body_w.writeAll("return shaped(shapes[flags], start, end, nodeArrHoles(f1, f2));");
         } else if (comptime specialChildKeysOf(node_name) != null) {
             try writeSpecialCase(&body_w, node_name);
         } else {

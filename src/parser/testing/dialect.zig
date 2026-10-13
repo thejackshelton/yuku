@@ -10,6 +10,8 @@ const Error = dialect.Error;
 const NodeIndex = ast.NodeIndex;
 const Parser = dialect.Parser;
 
+pub const files: []const dialect.File = &.{.{ .extension = ".jsx", .lang = .jsx }};
+
 pub const Node = enum {
     each,
     assertion,
@@ -325,8 +327,10 @@ test "the operator position binds at the precedence it receives" {
     try testing.expectEqual(3, tree.extra(tree.data(tree.root).program.body).len);
 }
 
-test "each node kind's shape reaches the decoders as JSON" {
+test "the dialect's files and node shapes reach the packages as JSON" {
     try testing.expectEqualStrings(
+        \\{"files":[{"extension":".jsx","lang":"jsx"}],"shapes":
+    ++
         \\[{"type":"EachStatement","fields":["item","list","body"],"list":2,"properties":{}},
     ++
         \\{"type":"AssertStatement","fields":["argument"],"list":-1,"properties":{}},
@@ -343,8 +347,8 @@ test "each node kind's shape reaches the decoders as JSON" {
     ++
         \\{"type":"JSXMarkedElement","fields":["element"],"list":-1,"properties":{}},
     ++
-        \\{"type":"JSXShorthandAttribute","fields":["value"],"list":-1,"properties":{}}]
-    , dialect.shapes_json);
+        \\{"type":"JSXShorthandAttribute","fields":["value"],"list":-1,"properties":{}}]}
+    , dialect.description);
 }
 
 test "a comment the dialect reads joins the tree's comments and prints" {

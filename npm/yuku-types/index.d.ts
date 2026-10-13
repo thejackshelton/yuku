@@ -11,9 +11,15 @@ type SourceLang = "js" | "ts" | "jsx" | "tsx" | "dts";
 
 /** How a file is read, shared by every package that takes source text. */
 interface FileOptions {
-  /** Names the file. `lang` and `sourceType` default from its extension. */
+  /**
+   * Names the file. `lang` and `sourceType` default from its extension, and a build with a
+   * dialect parses the files with the dialect's extensions in it.
+   */
   path?: string;
-  /** @default "js", or from `path` */
+  /**
+   * A standard language, which parses without a dialect.
+   * @default "js", or from `path`, or the dialect's language for a source with no `path`
+   */
   lang?: SourceLang;
   /**
    * `"module"` is strict and allows `import` and `export`. `"commonjs"` is a script whose top
@@ -21,12 +27,6 @@ interface FileOptions {
    * @default "module", or "commonjs" for `.cjs` and `.cts` paths
    */
   sourceType?: SourceType;
-  /**
-   * Parses with the dialect compiled into the WebAssembly module. The published module has none.
-   * See https://yuku.fyi/parser/dialect/#javascript.
-   * @default false
-   */
-  dialect?: boolean;
 }
 
 /** Whether a comment is a line or a block comment. */

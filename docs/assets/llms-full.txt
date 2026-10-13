@@ -695,6 +695,8 @@ const yuku = @import("parser");
 const ast = yuku.ast;
 const dialect = yuku.dialect;
 
+pub const files: []const dialect.File = &.{.{ .extension = ".js", .lang = .js }};
+
 pub const Node = enum {
     pipeline,
     topic,
@@ -757,7 +759,7 @@ my_module.addImport("parser", yuku.module("parser"));
 
 Inside the Yuku repository, `zig build -Ddialect=src/pipeline.zig` does the same. The dialect imports the parser it is compiled into as `@import("parser")`, so its functions take that parser's own types. A binary holds one parser, and so one dialect.
 
-A parse opts in with `dialect`, so one parser reads both your syntax and standard files.
+`files` names the files your syntax lives in, each with the standard language it extends. A parse opts in with `dialect`, so one parser reads both your syntax and standard files.
 
 ```zig
 var tree = try parser.parse(allocator, source, .{ .dialect = true });
@@ -905,9 +907,11 @@ import { parse as yukuParse } from "yuku-parser";
 const wasm = new WebAssembly.Module(readFileSync(new URL("./pipeline.wasm", import.meta.url)));
 
 export function parse(source, options) {
-  return yukuParse(source, { ...options, wasm, dialect: true });
+  return yukuParse(source, { ...options, wasm });
 }
 ```
+
+The packages parse a file with the dialect when its `path` has an extension in `files`, and a source with no `path` as the first of `files`. Any other file, or one given a `lang`, parses as standard syntax, so one build reads a whole project.
 
 A browser compiles it with `await WebAssembly.compileStreaming(fetch(url))` instead.
 

@@ -3,6 +3,7 @@
 //!   alloc(len)               -> ptr   buffer for the source bytes
 //!   parse(ptr, len, flags)   -> ptr   length-prefixed AST buffer `[u32 N][N bytes]`, or 0
 //!   analyze(ptr, len, flags) -> ptr   length-prefixed analyzer buffer, or 0
+//!   dialect()                -> ptr   length-prefixed JSON of the dialect, or 0 without one
 //!   free(ptr, len)           -> void
 
 const std = @import("std");
@@ -39,6 +40,20 @@ export fn analyze(ptr: [*]const u8, len: usize, flags: u32) usize {
     const out = analyzeBuffer(ptr[0..len], flags) catch return 0;
     return @intFromPtr(out.ptr);
 }
+
+// static, so the host reads it without freeing
+export fn dialect() usize {
+    if (!parser.dialect.bound) return 0;
+    return @intFromPtr(&description);
+}
+
+const description = blk: {
+    const json = parser.dialect.description;
+    var bytes: [4 + json.len]u8 = undefined;
+    std.mem.writeInt(u32, bytes[0..4], json.len, .little);
+    @memcpy(bytes[4..], json);
+    break :blk bytes;
+};
 
 fn parseBuffer(source: []const u8, flags: u32) ![]u8 {
     var tree = try parseTree(source, flags);

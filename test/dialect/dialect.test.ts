@@ -10,7 +10,7 @@ const wasm = new WebAssembly.Module(bytes);
 const source = "each (item of items) { assert item |> f(%); }";
 
 test("dialect nodes decode in the shapes their dialect declares", () => {
-  const { program, diagnostics } = parse(source, { wasm, dialect: true });
+  const { program, diagnostics } = parse(source, { wasm });
   expect(diagnostics).toEqual([]);
   expect(program.body[0]).toMatchObject({
     type: "EachStatement",
@@ -32,7 +32,7 @@ test("dialect nodes decode in the shapes their dialect declares", () => {
 
 test("dialect nodes walk and analyze like standard ones", () => {
   const types: string[] = [];
-  walk(parse(source, { wasm, dialect: true }).program, {
+  walk(parse(source, { wasm }).program, {
     enter(node) {
       types.push(node.type);
     },
@@ -49,9 +49,11 @@ test("dialect nodes walk and analyze like standard ones", () => {
     "Identifier",
     "TopicReference",
   ]);
-  expect(analyze(source, { wasm, dialect: true }).diagnostics).toEqual([]);
+  expect(analyze(source, { wasm }).diagnostics).toEqual([]);
 });
 
-test("a source that does not opt in parses as standard syntax", () => {
-  expect(parse(source, { wasm }).diagnostics.length).toBeGreaterThan(0);
+test("the dialect reads its own files, and other files and a given lang parse as standard", () => {
+  expect(parse(source, { wasm, path: "a.jsx" }).diagnostics).toEqual([]);
+  expect(parse(source, { wasm, path: "a.js" }).diagnostics.length).toBeGreaterThan(0);
+  expect(parse(source, { wasm, lang: "jsx" }).diagnostics.length).toBeGreaterThan(0);
 });

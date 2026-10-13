@@ -260,7 +260,7 @@ export class Module {
     this.analyzer = analyzer;
     this.path = path;
     this.source = typeof source === "string" ? source : utf8.decode(source);
-    this.#r = decode(run("analyze", this.source, { ...options, path }), this.source, path);
+    this.#r = run("analyze", this.source, { ...options, path }, decode);
     this.#sem = this.#r.semantic;
   }
 

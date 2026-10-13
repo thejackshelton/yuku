@@ -1,4 +1,4 @@
-// AST transfer format v10, little endian with no version byte. the decoder that
+// AST transfer format v11, little endian with no version byte. the decoder that
 // tools/estree/decoder.zig generates shares the layout of the extern structs below
 //
 // sections, in order
@@ -6,8 +6,7 @@
 //   header             HEADER_SIZE bytes
 //   nodes              node_count * NODE_SIZE, one PackedNode each
 //   extra              extra_count * 4, the u32 array backing IndexRange
-//   strings            string_pool_len bytes of UTF-8, the last shapes_len the dialect's node
-//                      shapes as JSON, zero-padded to a 4-byte boundary
+//   strings            string_pool_len bytes of UTF-8, zero-padded to a 4-byte boundary
 //   attached_offsets   (node_count + 1) u32 prefix sums, only with FLAG_ATTACHED_COMMENTS
 //   attached_comments  attached_comment_count * ATTACHED_COMMENT_SIZE
 //   comments           comment_count * COMMENT_SIZE in source order, only with FLAG_COMMENTS
@@ -54,7 +53,6 @@ const Header = extern struct {
     flags: u32,
     // positions below this need no UTF-16 conversion
     first_non_ascii: u32,
-    shapes_len: u32,
 };
 
 const PackedNode = extern struct {
@@ -109,7 +107,6 @@ pub const HDR_DIAG_COUNT_U32: u32 = @offsetOf(Header, "diag_count") / 4;
 pub const HDR_PROGRAM_INDEX_U32: u32 = @offsetOf(Header, "program_index") / 4;
 pub const HDR_FLAGS_U32: u32 = @offsetOf(Header, "flags") / 4;
 pub const HDR_FIRST_NON_ASCII_U32: u32 = @offsetOf(Header, "first_non_ascii") / 4;
-pub const HDR_SHAPES_LEN_U32: u32 = @offsetOf(Header, "shapes_len") / 4;
 
 pub const FLAG_TS: u32 = 1 << 0;
 pub const FLAG_ATTACHED_COMMENTS: u32 = 1 << 1;
@@ -229,7 +226,7 @@ pub fn bufferSize(tree: *const ast.Tree) usize {
     var size: usize = HEADER_SIZE +
         tree.nodes.len * NODE_SIZE +
         tree.extras.items.len * 4 +
-        std.mem.alignForward(usize, tree.strings.extra.items.len + dialect.shapes_json.len, 4) +
+        std.mem.alignForward(usize, tree.strings.extra.items.len, 4) +
         tree.attached_comment_offsets.len * 4 +
         tree.attached_comments.len * ATTACHED_COMMENT_SIZE +
         tree.comments.len * COMMENT_SIZE +
@@ -250,7 +247,7 @@ pub fn serializeInto(tree: *const ast.Tree, buf: []u8) usize {
     std.debug.assert(@backingInt(tree.root) + 1 == tree.nodes.len);
     if (builtin.optimize.runtimeSafety()) assertPostOrder(tree);
 
-    const string_pool_len: u32 = @intCast(tree.strings.extra.items.len + dialect.shapes_json.len);
+    const string_pool_len: u32 = @intCast(tree.strings.extra.items.len);
     const has_attached = tree.attached_comment_offsets.len != 0;
     if (has_attached) std.debug.assert(tree.attached_comment_offsets.len == tree.nodes.len + 1);
 
@@ -271,7 +268,6 @@ pub fn serializeInto(tree: *const ast.Tree, buf: []u8) usize {
         .program_index = @backingInt(tree.root),
         .flags = hdr_flags,
         .first_non_ascii = @intCast(firstNonAsciiOffset(tree.source)),
-        .shapes_len = @intCast(dialect.shapes_json.len),
     };
     var pos: usize = 0;
     writeBytes(buf, &pos, std.mem.asBytes(&hdr));
@@ -285,7 +281,6 @@ pub fn serializeInto(tree: *const ast.Tree, buf: []u8) usize {
     writeBytes(buf, &pos, std.mem.sliceAsBytes(tree.extras.items));
 
     writeBytes(buf, &pos, tree.strings.extra.items);
-    writeBytes(buf, &pos, dialect.shapes_json);
     const pool_pad = std.mem.alignForward(u32, string_pool_len, 4) - string_pool_len;
     @memset(buf[pos..][0..pool_pad], 0);
     pos += pool_pad;

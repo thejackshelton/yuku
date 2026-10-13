@@ -50,11 +50,25 @@ pub const Shape = struct {
     lexical_bindings: bool = false,
 };
 
+/// A kind of file a dialect parses, which its `files` declaration lists.
+pub const File = struct {
+    /// The extension of the file's path, such as ".tsrx".
+    extension: []const u8,
+    /// The standard language the dialect extends in these files.
+    lang: ast.Lang,
+};
+
 /// The dialect's `Node` enum, the kind of each of its nodes.
 pub const Kind = if (@hasDecl(Bound, "Node")) Bound.Node else enum(u16) { _ };
 
 pub const bound = @typeInfo(Bound).@"struct".decl_names.len > 0;
 pub const prints = @hasDecl(Bound, "print");
+
+comptime {
+    if (bound and (!@hasDecl(Bound, "files") or Bound.files.len == 0)) {
+        @compileError("a dialect lists the `files` it parses");
+    }
+}
 
 pub inline fn has(comptime position: Position) bool {
     return @hasDecl(Bound, @tagName(position));
@@ -100,8 +114,20 @@ pub fn shape(kind: Kind) Shape {
     return kind.shape();
 }
 
-/// Every node kind's shape as JSON, which each AST buffer carries to the decoders.
-pub const shapes_json: []const u8 = if (@hasDecl(Bound, "Node")) shapesJson() else "";
+/// The dialect as JSON for the JavaScript packages, `{ files, shapes }`, empty without one.
+pub const description: []const u8 = if (bound) descriptionJson() else "";
+
+fn descriptionJson() []const u8 {
+    var files: []const u8 = "";
+    for (Bound.files, 0..) |file, i| {
+        files = files ++ (if (i == 0) "" else ",") ++ std.fmt.comptimePrint(
+            "{{\"extension\":\"{s}\",\"lang\":\"{t}\"}}",
+            .{ file.extension, file.lang },
+        );
+    }
+    const shapes = if (@hasDecl(Bound, "Node")) shapesJson() else "[]";
+    return "{\"files\":[" ++ files ++ "],\"shapes\":" ++ shapes ++ "}";
+}
 
 fn shapesJson() []const u8 {
     var json: []const u8 = "[";
