@@ -41,8 +41,7 @@
     "#module": {
       "workerd": "./dist/module/workerd.js",
       "default": "./dist/module/inline.js"
-    },
-    "#wasm": "./dist/yuku.wasm"
+    }
   },
   "files": [
     "dist"

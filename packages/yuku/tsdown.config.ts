@@ -20,5 +20,9 @@ export default defineConfig({
   copy: [{ from: "core/yuku.wasm", to: "dist" }],
   loader: { ".wasm": "binary" },
   deps: { neverBundle: [/^#/] },
-  outputOptions: { chunkFileNames: "shared/[name].js" },
+  outputOptions: {
+    chunkFileNames: "shared/[name].js",
+    // bundlers for workerd load an import as WebAssembly only when its path ends in `.wasm`
+    paths: { "#wasm": "../yuku.wasm" },
+  },
 });
