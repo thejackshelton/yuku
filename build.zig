@@ -131,15 +131,11 @@ pub fn build(b: *std.Build) void {
     );
     codegen_reference_step.dependOn(&b.addInstallArtifact(codegen_reference, .{}).step);
 
+    // baseline WebAssembly runs everywhere, and SIMD and the later features measured no faster
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
-        .cpu_features_add = std.Target.wasm.featureSet(&.{
-            .bulk_memory,
-            .nontrapping_fptoint,
-            .sign_ext,
-            .simd128,
-        }),
+        .cpu_model = .{ .explicit = &std.Target.wasm.cpu.mvp },
     });
     // small saves 85 kB at the cost of 10 to 15% of the speed
     const wasm_optimize: std.lang.Optimize = .fast;
@@ -238,7 +234,7 @@ fn addParserImports(
 }
 
 /// Adds the WebAssembly module of a package that compiles a dialect into Yuku, to install as
-/// `<name>.wasm` and pass to Yuku's npm packages.
+/// `<name>.wasm` and pass to the `yuku` npm package as its `wasm` option.
 pub fn addWasm(
     b: *std.Build,
     yuku: *std.Build.Dependency,
