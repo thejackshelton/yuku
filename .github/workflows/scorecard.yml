@@ -1,7 +1,5 @@
 name: Scorecard
 
-# grades the repository's security posture into the Security tab and the public badge
-
 on:
   branch_protection_rule:
   push:

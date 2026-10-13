@@ -2,8 +2,8 @@
 
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
-import { analyze, BindingFlags, type Binding, type Module } from "yuku-analyzer";
-import type { Node, SourceLang, SourceType, TSImportEqualsDeclaration } from "yuku-parser";
+import { analyze, BindingFlags, type Binding, type Module } from "yuku/analyzer";
+import type { Node, SourceLang, SourceType, TSImportEqualsDeclaration } from "yuku";
 import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
 import { differential, singleFileProgram, type Comparison, type Known } from "./utils/differential";
 

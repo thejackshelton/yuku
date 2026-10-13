@@ -3,8 +3,8 @@
 import { describe, expect, test } from "bun:test";
 import { analyze, type Scope as TheirScope } from "@typescript-eslint/scope-manager";
 import { parse as tsParse } from "@typescript-eslint/typescript-estree";
-import { analyze as analyzeFile, type Binding, type Module, type Scope } from "yuku-analyzer";
-import type { Node, SourceLang, SourceType } from "yuku-parser";
+import { analyze as analyzeFile, type Binding, type Module, type Scope } from "yuku/analyzer";
+import type { Node, SourceLang, SourceType } from "yuku";
 import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
 import { differential, type Comparison, type Known } from "./utils/differential";
 

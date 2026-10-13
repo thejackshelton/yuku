@@ -49,7 +49,6 @@ pub fn lineBreakLen(source: []const u8, pos: usize) u8 {
     };
 }
 
-/// A decoded code point and the offset just past its source.
 pub const Decoded = struct { value: u21, end: usize };
 
 pub fn parseOctal(input: []const u8, start: usize) Decoded {
@@ -77,7 +76,6 @@ inline fn parseHex4(input: []const u8, start: usize) ?Decoded {
     return .{ .value = value, .end = start + 4 };
 }
 
-// null when there are no digits or the value exceeds U+10FFFF
 fn parseHexVariable(input: []const u8, start: usize, digits_max: usize) ?Decoded {
     var value: u32 = 0;
     var i = start;
@@ -203,7 +201,6 @@ pub fn decodeStringEscapes(
                     i += 1;
                 }
             },
-            // line continuations
             '\n' => i += 1,
             '\r' => {
                 i += 1;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Analyzer, analyze } from "yuku-analyzer";
+import { Analyzer, analyze } from "yuku/analyzer";
 import { summary } from "./utils/summarize";
 
 describe("write detection through wrappers", () => {

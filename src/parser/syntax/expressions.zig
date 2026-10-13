@@ -75,7 +75,6 @@ pub fn parseExpression(
     return left;
 }
 
-// a line break before postfix `++` `--`, `as`, `satisfies`, or non-null `!` ends the expression
 inline fn infixPrecedence(token: Token, is_ts: bool) u8 {
     switch (token.tag) {
         .increment, .decrement, .as, .satisfies => {
@@ -623,9 +622,7 @@ fn parseNewExpression(parser: *Parser) Error!?ast.NodeIndex {
     var type_arguments: ast.NodeIndex = .null;
 
     while (true) {
-        // committed type arguments end the callee and fold into the NewExpression
-        //   new C<T>(x)
-        //   new C<T>`x`    NewExpression(TaggedTemplateExpression<T>(C))
+        // committed type arguments end the callee, unless a tagged template takes them
         if (type_arguments != .null and
             parser.current_token.tag != .template_head and
             parser.current_token.tag != .no_substitution_template)
@@ -1174,8 +1171,6 @@ fn parseOptionalChain(parser: *Parser, left: ast.NodeIndex) Error!?ast.NodeIndex
                 expr = try ts.parseNonNullExpression(parser, expr) orelse return null;
             },
             // a generic call stays in the chain, bare type arguments close it
-            //   a?.b<T>(c)    ChainExpression(a?.b<T>(c))
-            //   a?.b<T>       TSInstantiationExpression(ChainExpression(a?.b))
             .less_than, .left_shift => {
                 if (!is_ts) break;
                 const checkpoint = parser.checkpoint();

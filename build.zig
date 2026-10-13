@@ -56,7 +56,6 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "util", .module = util_module }},
         }),
     });
-    // downloads the unicode data on first run
     const test_tools_step = b.step("test-tools", "Run the tools tests");
     test_tools_step.dependOn(&b.addRunArtifact(tools_tests).step);
 
@@ -160,8 +159,9 @@ pub fn build(b: *std.Build) void {
         .dialect = dialect_source,
     });
 
-    const wasm = b.addInstallArtifact(addWasmFrom(b, b, "yuku"), .{});
-    b.step("wasm", "Build the WebAssembly module the npm packages run").dependOn(&wasm.step);
+    const yuku_wasm = addWasmFrom(b, b, "yuku");
+    const wasm = b.addInstallArtifact(yuku_wasm, .{});
+    b.step("wasm", "Build the WebAssembly module").dependOn(&wasm.step);
 
     const main_exe = b.addExecutable(.{
         .name = "yuku",
@@ -184,41 +184,20 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "parser", .module = parser_module }},
     });
 
-    for ([_]struct {
-        step: []const u8,
-        description: []const u8,
-        root: []const u8,
-        output: []const u8,
-    }{
-        .{
-            .step = "gen-parser-decoder",
-            .description = "Generate decode.js for yuku-parser",
-            .root = "tools/gen_parser_decoder.zig",
-            .output = "decode.js",
-        },
-        .{
-            .step = "gen-analyzer-decoder",
-            .description = "Generate decode-analyzer.js for yuku-analyzer",
-            .root = "tools/gen_analyzer_decoder.zig",
-            .output = "decode-analyzer.js",
-        },
-        .{
-            .step = "gen-walk-tables",
-            .description = "Generate generated.ts for yuku-ast",
-            .root = "tools/gen_walk_tables.zig",
-            .output = "walk-tables.ts",
-        },
-        .{
-            .step = "gen-token-types",
-            .description = "Generate tokens.d.ts for @yuku-toolchain/types",
-            .root = "tools/gen_token_types.zig",
-            .output = "tokens.d.ts",
-        },
+    const package_files = b.addUpdateSourceFiles();
+    package_files.addCopyFileToSource(
+        yuku_wasm.getEmittedBin(),
+        "packages/yuku/core/yuku.wasm",
+    );
+    for ([_]struct { name: []const u8, output: []const u8 }{
+        .{ .name = "gen_decoder", .output = "packages/yuku/core/decode.js" },
+        .{ .name = "gen_walk_tables", .output = "packages/yuku/ast/generated.ts" },
+        .{ .name = "gen_token_types", .output = "packages/yuku/types/tokens.ts" },
     }) |generator| {
         const generator_exe = b.addExecutable(.{
-            .name = generator.step,
+            .name = generator.name,
             .root_module = b.createModule(.{
-                .root_source_file = b.path(generator.root),
+                .root_source_file = b.path(b.fmt("tools/{s}.zig", .{generator.name})),
                 .target = b.graph.host,
                 .optimize = optimize,
                 .imports = &.{
@@ -228,9 +207,10 @@ pub fn build(b: *std.Build) void {
             }),
         });
         const output = b.addRunArtifact(generator_exe).captureStdOut(.{});
-        const install = b.addInstallFile(output, generator.output);
-        b.step(generator.step, generator.description).dependOn(&install.step);
+        package_files.addCopyFileToSource(output, generator.output);
     }
+    b.step("package", "Write the WebAssembly and generated sources of packages/yuku")
+        .dependOn(&package_files.step);
 }
 
 const ParserImports = struct {

@@ -1,5 +1,5 @@
 // the analyzer buffer is the AST buffer with FLAG_SEMANTIC set, then these tables after the
-// diagnostics, aligned to 4 bytes. the decoder derives use lists itself
+// diagnostics, aligned to 4 bytes, without use lists since the decoder derives them
 //
 //   sub-header   SUBHEADER_SIZE bytes
 //   scopes       scope_count * SCOPE_SIZE, one PackedScope each
@@ -197,7 +197,6 @@ comptime {
     std.debug.assert(@bitOffsetOf(module_record.Flags, "uses_import_meta") == 3);
 }
 
-/// The size of the AST buffer plus the semantic sections.
 pub fn bufferSize(tree: *const ast.Tree, sem: *const Semantic, records: Records) usize {
     return std.mem.alignForward(usize, transfer.bufferSize(tree), 4) + SUBHEADER_SIZE +
         sem.scopes.list.len * SCOPE_SIZE +
@@ -209,7 +208,6 @@ pub fn bufferSize(tree: *const ast.Tree, sem: *const Semantic, records: Records)
         sem.node_scopes.len * 4;
 }
 
-/// Writes the AST buffer and then the semantic sections, returning the bytes written.
 pub fn serializeInto(
     tree: *const ast.Tree,
     sem: *const Semantic,

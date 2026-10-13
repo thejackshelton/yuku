@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Analyzer, BindingFlags } from "yuku-analyzer";
+import { Analyzer, BindingFlags } from "yuku/analyzer";
 import { summary } from "./utils/summarize";
 
 describe("resolution", () => {

@@ -207,9 +207,8 @@ pub fn expressionToPattern(
 
         .binding_identifier => {},
 
-        // `.binding` re-descends targets converted under `.assignable` at `=`. in
-        // `([a.b] = []) => {}` the parameter forbids `a.b` and a stripped `(a)`, and `a`
-        // must become a binding_identifier
+        // `.binding` re-descends targets already converted under `.assignable` at `=`,
+        // as in the parameter of `([a.b] = []) => {}`
         .assignment_pattern => |pattern| if (context == .binding) {
             try expressionToPattern(parser, pattern.left, context);
         },

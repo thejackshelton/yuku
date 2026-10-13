@@ -5,8 +5,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse, sourceTypeFromPath, type SourceLang } from "yuku-parser";
-import { generate, type GenerateOptions } from "yuku-codegen";
+import { parse, sourceTypeFromPath, type SourceLang } from "yuku";
+import { generate, type GenerateOptions } from "yuku/codegen";
 import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
 import { commentPlacements, deepChains, INSTANTIATIONS } from "./helpers";
 

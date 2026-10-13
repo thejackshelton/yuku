@@ -244,7 +244,6 @@ pub fn Layer(comptime C: type, comptime V: type) type {
 }
 
 const dispatch = struct {
-    // `enter_node` first, then the typed hook such as `enter_function`
     fn enter(
         comptime C: type,
         comptime V: type,
@@ -271,7 +270,6 @@ const dispatch = struct {
         }
     }
 
-    // the typed hook first, then `exit_node`
     fn exit(
         comptime C: type,
         comptime V: type,

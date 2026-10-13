@@ -21,7 +21,6 @@ pub const ParseClassOptions = struct {
     is_abstract: bool = false,
 };
 
-/// Parses a class declaration or expression.
 /// https://tc39.es/ecma262/#sec-class-definitions
 pub fn parseClass(
     parser: *Parser,

@@ -43,7 +43,6 @@ pub const LexerMode = enum {
     jsx_tag,
 };
 
-// count of leading ascii identifier bytes
 inline fn identContinueRun(chunk: Simd.Chunk) u32 {
     const lower = chunk | Simd.splat(0x20);
     const alpha = (lower -% Simd.splat('a')) < Simd.splat(26);
@@ -53,7 +52,6 @@ inline fn identContinueRun(chunk: Simd.Chunk) u32 {
     return Simd.leadingTrueCount(alpha | digit | underscore | dollar);
 }
 
-// first offset at or after `from` holding one of `chars`, `src.len` on a miss
 fn findAnyPos(comptime chars: []const u8, src: []const u8, from: u32) u32 {
     var i: usize = from;
     while (i + 16 <= src.len) : (i += 16) {
@@ -641,7 +639,6 @@ pub const Lexer = struct {
         };
     }
 
-    // scans from the cursor to a closing backtick or a `${`, null when unterminated
     inline fn scanTemplateSpan(
         self: *Lexer,
         start: u32,
@@ -1102,7 +1099,6 @@ pub const Lexer = struct {
         return self.consumeDigits(std.ascii.isDigit);
     }
 
-    // skips the radix letter of `0x`, `0o`, or `0b`, then needs at least one digit
     inline fn consumeRadixDigits(
         self: *Lexer,
         comptime isValidDigit: fn (u8) bool,

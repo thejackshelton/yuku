@@ -220,8 +220,7 @@ pub const TokenTag = enum(u32) {
     jsx_text = 158,
 
     eof = 159,
-    /// Input the lexer could not scan during lookahead. It matches no production, so a
-    /// disambiguation that sees it falls through to the real parse.
+    /// Input the lexer could not scan during lookahead, left for the real parse to report.
     invalid = 160,
 
     pub fn precedence(self: TokenTag) u5 {

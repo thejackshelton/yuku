@@ -104,7 +104,6 @@ pub const Ctx = struct {
         }
     }
 
-    // how the identifier at the top of the path uses its name
     fn identifierFlags(self: *const Ctx, data: ast.NodeData) Reference.Flags {
         if (data != .identifier_reference) return .{};
         var flags = refPosition(self.tree, &self.path, self.inTypePosition());

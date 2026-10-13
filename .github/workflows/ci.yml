@@ -106,7 +106,7 @@ jobs:
       - name: Zig build
         run: zig build
 
-      - name: Build the npm packages
+      - name: Build the package
         run: bun run build
 
       - name: Zig tests

@@ -1,10 +1,4 @@
-//! The WebAssembly module the npm packages run, freestanding, with no host imports.
-//!
-//!   alloc(len)               -> ptr   buffer for the source bytes
-//!   parse(ptr, len, flags)   -> ptr   length-prefixed AST buffer `[u32 N][N bytes]`, or 0
-//!   analyze(ptr, len, flags) -> ptr   length-prefixed analyzer buffer, or 0
-//!   dialect()                -> ptr   length-prefixed JSON of the dialect, or 0 without one
-//!   free(ptr, len)           -> void
+// the JavaScript instantiates this module with no imports
 
 const std = @import("std");
 const parser = @import("parser");
@@ -12,7 +6,7 @@ const transfer = @import("transfer/root.zig");
 
 const gpa = std.heap.wasm_allocator;
 
-// packed by `yuku-parser`
+// packed by packages/yuku/core/wasm.ts
 const flag = struct {
     const source_type_mask = 0b11;
     const lang_shift = 2;

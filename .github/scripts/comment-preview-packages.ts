@@ -67,20 +67,16 @@ async function previewPlayground(): Promise<string | null> {
   return null;
 }
 
-const sha = packages.find((entry) => entry.name === "yuku-parser")?.url.split("@").pop();
+const sha = packages.find((entry) => entry.name === "yuku")?.url.split("@").pop();
 const origin = (await previewPlayground()) ?? "https://playground.yuku.fyi";
 const playground = sha ? `${origin}/?pr=${sha}` : null;
 
 const body = [
   MARKER,
-  "### Preview packages",
+  "### Preview package",
   "",
   ...(playground ? [`Try this PR in the [playground](${playground}).`, ""] : []),
-  "| Package | Install |",
-  "| --- | --- |",
-  ...packages
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((entry) => `| \`${entry.name}\` | \`npm i ${entry.url}\` |`),
+  ...packages.map((entry) => `\`npm i ${entry.url}\``),
 ].join("\n");
 
 const listed = await fetch(`${api}/issues/${PR_NUMBER}/comments?per_page=100`, { headers });
@@ -104,4 +100,4 @@ if (!posted.ok) {
 }
 
 const action = existing ? "updated" : "created";
-console.log(`${action} the preview comment with ${packages.length} packages`);
+console.log(`${action} the preview comment`);

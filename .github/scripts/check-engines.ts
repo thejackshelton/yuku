@@ -1,38 +1,21 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Glob } from "bun";
-
-interface PackageManifest {
-  name: string;
-  main?: string;
-  engines?: { node?: string };
-}
 
 const root = join(import.meta.dir, "..", "..");
 
-const readJson = (path: string): PackageManifest => JSON.parse(readFileSync(path, "utf8"));
+const nodeFloor = (path: string): string | undefined =>
+  JSON.parse(readFileSync(join(root, path), "utf8")).engines?.node;
 
-const floor = readJson(join(root, "package.json")).engines?.node;
+const floor = nodeFloor("package.json");
 if (floor === undefined) {
   console.error("the root package.json declares no engines.node floor");
   process.exit(1);
 }
 
-const mismatched: string[] = [];
-
-for (const manifestPath of new Glob("npm/*/package.json").scanSync(root)) {
-  const manifest = readJson(join(root, manifestPath));
-  if (manifest.main === undefined) continue;
-  const declared = manifest.engines?.node ?? "no engines.node";
-  if (declared !== floor) {
-    mismatched.push(`${manifest.name}: declares ${declared}, expected ${floor}`);
-  }
-}
-
-if (mismatched.length > 0) {
-  console.error("packages disagree with the runtime floor in the root package.json:\n");
-  for (const line of mismatched) console.error(`  ${line}`);
+const declared = nodeFloor("packages/yuku/package.json");
+if (declared !== floor) {
+  console.error(`packages/yuku declares ${declared ?? "no engines.node"}, expected ${floor}`);
   process.exit(1);
 }
 
-console.log(`every package declares the runtime floor, ${floor}`);
+console.log(`the package declares the runtime floor, ${floor}`);

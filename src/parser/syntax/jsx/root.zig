@@ -22,8 +22,7 @@ inline fn exitJsxTag(parser: *Parser) void {
     parser.setLexerMode(.normal);
 }
 
-// a child leaves the final `>` for parseJsxChildren to rescan,
-// an attribute value resumes jsx_tag mode and top level returns to javascript
+// a child leaves the final `>` for parseJsxChildren to rescan
 fn exitJsxElement(parser: *Parser, comptime context: JsxElementContext) Error!?void {
     std.debug.assert(parser.current_token.tag == .greater_than);
     switch (context) {
@@ -406,7 +405,6 @@ fn expectJsxChildRightBrace(parser: *Parser, comptime what: []const u8) Error!?u
     return parser.current_token.span.end;
 }
 
-// `{}` holds an empty expression spanning the gap between its braces
 fn addEmptyExpressionContainer(parser: *Parser, start: u32, end: u32) Error!ast.NodeIndex {
     const empty = try parser.tree.addNode(
         .{ .jsx_empty_expression = .{} },

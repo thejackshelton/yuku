@@ -1,6 +1,6 @@
 ---
 .title = "Traverse",
-.description = "Walk and transform a tree with typed visitor hooks, in four modes from plain visits to full semantics.",
+.description = "Walk and transform a tree with typed visitor hooks.",
 .author = "Arshad Yaseen",
 .date = @date("2026-06-23T00:00:00"),
 .layout = "page.shtml",
@@ -16,7 +16,7 @@ The traverser walks a tree and calls your visitor's hooks at every node. Pick th
 
 In `basic`, `scoped`, and `semantic`, `ctx.tree` is a `*const Tree`, so a visitor cannot mutate what it reads. Only `transform` hands it a mutable tree.
 
-In JavaScript, [`yuku-ast`](https://www.npmjs.com/package/yuku-ast) walks any ESTree AST, and [`yuku-analyzer`](https://www.npmjs.com/package/yuku-analyzer) adds the semantic model to the walk.
+In JavaScript, [`walk`](/parser/ast/#js-walking) from `yuku/ast` walks any ESTree AST, and [`module.walk`](/parser/semantic/#js-walking) from `yuku/analyzer` adds the semantic model to the walk.
 
 ## [Visitors]($section.id('visitors'))
 
@@ -48,7 +48,9 @@ try basic.traverse(Counter, &tree, &counter);
 std.debug.print("{d} functions\n", .{counter.functions});
 ```
 
-A misspelled hook or a wrong payload type is a compile error. `enter_node` and `exit_node` fire for every node, with the `ast.NodeData` payload. The walk is depth-first with siblings in source order. An enter hook returns a `traverser.Action`, `.proceed` to walk into the children, `.skip` to pass over them, or `.stop` to end the walk, and may return it in an error union to `try` an allocation. An exit hook returns nothing.
+A misspelled hook or a wrong payload type is a compile error. `enter_node` and `exit_node` fire for every node, with the `ast.NodeData` payload. The walk is depth-first with siblings in source order.
+
+An enter hook returns a `traverser.Action`: `.proceed` to walk into the children, `.skip` to pass over them, or `.stop` to end the walk. It may return it in an error union to `try` an allocation. An exit hook returns nothing.
 
 Every mode's context has `ctx.tree` and `ctx.path`. The path knows the current node's `parent()`, its `ancestor(n)` with the current node at 0, its `ancestors()` from the current node up, and its `depth()`.
 
@@ -81,7 +83,7 @@ On `{ var b; } for (var i = 0;;) {}` it finds `b` and `i`. The walk also returns
 
 ## [Semantic]($section.id('semantic'))
 
-The walk builds the [`Semantic`](/parser/semantic/) model as it goes and returns it. During the walk, `ctx.inTypePosition()` and `ctx.inTsNamespace()` tell where it is, and `ctx.symbols.binding(scope, name)` finds a name declared so far. References resolve when the walk ends, so a visitor collects nodes and asks the model after. This one finds the types a file imports.
+The walk builds the [`Semantic`](/parser/semantic/) model as it goes and returns it. During the walk, `ctx.inTypePosition()` and `ctx.inTsNamespace()` tell where it is, and `ctx.symbols.binding(scope, name)` finds a name declared so far. References resolve when the walk ends, so a visitor collects nodes and queries the model after. This one finds the types a file imports.
 
 ```zig
 const sem = traverser.semantic;
@@ -146,11 +148,11 @@ try transform.traverse(AddToMultiply, &tree, &rewrite);
 
 The tree's [building and editing](/parser/ast/#building-and-editing) calls, such as `addNode`, `addString`, and `setIdentifierName`, work during the walk. After wrapping a node in a new parent, return `.skip`, so the walker does not enter the moved node again. [Codegen](/parser/codegen/) prints the result.
 
-`ast.Tree.initEmpty` starts a tree from nothing, so a transpiler can walk an input tree with full semantics while building a separate output tree. Modes compose as passes, such as a transform followed by a semantic walk over its result.
+To build a separate output tree, start one with `ast.Tree.initEmpty` and walk the input tree in any mode. Modes compose as passes, such as a transform followed by a semantic walk over its result.
 
 ## [Your own mode]($section.id('your-own-mode'))
 
-The four modes are four context types over one walker. A context of your own has a `tree` field and `enter(index, data)` and `exit(index, data)` methods, and `traverser.Layer` runs them around your visitor's hooks.
+Each mode is a context type over one walker. A context of your own has a `tree` field and `enter(index, data)` and `exit(index, data)` methods, and `traverser.Layer` runs them around your visitor's hooks.
 
 ```zig
 var layer = traverser.Layer(MyCtx, V){ .inner = &visitor };

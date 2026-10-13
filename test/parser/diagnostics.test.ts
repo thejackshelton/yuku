@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parse, type ParseOptions } from "yuku-parser";
+import { parse, type ParseOptions } from "yuku";
 
 const script: ParseOptions = { sourceType: "script" };
 

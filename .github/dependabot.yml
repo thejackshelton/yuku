@@ -4,7 +4,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    # a compromised release is usually caught within a week. security updates skip the wait
+    # a week catches most compromised releases, security updates skip the wait
     cooldown:
       default-days: 7
     groups:
@@ -29,8 +29,7 @@ updates:
     commit-message:
       prefix: "deps"
     ignore:
-      - dependency-name: "yuku-*"
-      - dependency-name: "@yuku-*/*"
+      - dependency-name: "yuku"
       # TypeScript 7 drops the compiler API the tsc differential test uses, and
       # @typescript-eslint/typescript-estree requires < 6.1.0
       - dependency-name: "typescript"

@@ -1,5 +1,3 @@
-// ESTree names and lookup tables for the decoder generator
-
 const std = @import("std");
 const parser = @import("parser");
 const ast = parser.ast;
@@ -89,7 +87,6 @@ pub fn estreeField(comptime tag: []const u8, comptime field: []const u8) []const
     return snakeConvert(field, false);
 }
 
-// sparse arrays, whose holes decode as null
 pub fn isHoleyArray(comptime tag: []const u8, comptime field: []const u8) bool {
     return std.mem.eql(u8, tag, "array_expression") and std.mem.eql(u8, field, "elements");
 }

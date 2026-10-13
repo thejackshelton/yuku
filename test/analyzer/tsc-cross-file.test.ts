@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import ts from "typescript";
-import { Analyzer, type Definition, type Module } from "yuku-analyzer";
+import { Analyzer, type Definition, type Module } from "yuku/analyzer";
 import { loadedProjects, type LoadedProject } from "../corpus";
 import { SAMPLE_MAX } from "./utils/differential";
 

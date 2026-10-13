@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { parse } from "yuku-parser";
-import type { GenerateOptions } from "yuku-codegen";
+import { parse } from "yuku";
+import type { GenerateOptions } from "yuku/codegen";
 import { commentPlacements, gen } from "./helpers";
 
 const ALL = { comments: true } as const;

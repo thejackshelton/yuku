@@ -9,7 +9,7 @@ import {
   type ParseResult,
   type Diagnostic,
   type SourceLang,
-} from "yuku-parser";
+} from "yuku";
 import { deserializeAstJson, formatDiagnostics, serializeAstJson } from "../ast-helpers-for-test";
 
 interface TestSuite {

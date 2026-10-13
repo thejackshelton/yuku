@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
-import type { SourceType } from "yuku-parser";
+import type { SourceType } from "yuku";
 import type { CorpusFile } from "../../corpus";
 
 export interface Comparison {

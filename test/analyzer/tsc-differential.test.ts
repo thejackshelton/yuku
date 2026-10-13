@@ -2,8 +2,8 @@
 
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
-import { analyze } from "yuku-analyzer";
-import type { SourceLang, SourceType } from "yuku-parser";
+import { analyze } from "yuku/analyzer";
+import type { SourceLang, SourceType } from "yuku";
 import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
 import { differential, singleFileProgram, type Comparison, type Known } from "./utils/differential";
 

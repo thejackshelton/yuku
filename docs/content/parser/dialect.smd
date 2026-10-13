@@ -1,13 +1,11 @@
 ---
 .title = "Dialects",
-.description = "Build a language on JavaScript, TypeScript, and JSX, with semantic analysis, traversal, printing, and JavaScript packages that work on it.",
+.description = "Add syntax to JavaScript, TypeScript, and JSX with one Zig file compiled into the parser.",
 .author = "Arshad Yaseen",
 .date = @date("2026-10-12T00:00:00"),
 .layout = "page.shtml",
 ---
-A dialect adds syntax to the languages Yuku parses, such as a language proposal, a template syntax, or a language of your own on JavaScript. It is one Zig file compiled into the parser. The file claims input at a few positions in the grammar, parses there with Yuku's own grammar, and builds nodes of kinds it declares. Semantic analysis, the traverser, codegen, and the JavaScript packages all take those nodes.
-
-A parser built without a dialect carries none of its code, and a source that does not opt in parses as standard syntax.
+A dialect adds syntax to the languages Yuku parses, such as a language proposal, a template syntax, or a language of your own on JavaScript. It is one Zig file compiled into the parser. The file claims input at a few positions in the grammar, parses there with Yuku's own grammar, and builds nodes of kinds it declares. The rest of Yuku works on those nodes.
 
 ## [When to use one]($section.id('when-to-use-one'))
 
@@ -75,7 +73,7 @@ pub fn print(w: *dialect.Printer, kind: Node, children: []const ast.NodeIndex) d
 }
 ```
 
-Compiled into the parser, it reads `const total = prices |> sum(%) |> round(%, 2);`, the two pipelines grouping left to right. They sit in a standard tree, the calls in them resolve and walk like any others, codegen prints the line back as written, and in JavaScript the first decodes as `{ type: "PipelineExpression", left, right }`.
+Compiled in, it parses `const total = prices |> sum(%) |> round(%, 2);` with the pipelines grouping left to right. The calls inside them resolve and walk like any others, codegen prints the line back as written, and in JavaScript each pipeline decodes as `{ type: "PipelineExpression", left, right }`.
 
 ## [Compiling one in]($section.id('compiling-one-in'))
 
@@ -91,7 +89,7 @@ my_module.addImport("parser", yuku.module("parser"));
 
 Inside the Yuku repository, `zig build -Ddialect=src/pipeline.zig` does the same. The dialect imports the parser it is compiled into as `@import("parser")`, so its functions take that parser's own types. A binary holds one parser, and so one dialect.
 
-`files` names the files your syntax lives in, each with the standard language it extends. A parse opts in with `dialect`, so one parser reads both your syntax and standard files.
+Every dialect declares `files`, the extensions of the files your syntax lives in, each with the standard language it extends. [In JavaScript](#javascript), they decide which files parse with the dialect. In Zig, a parse opts in with `dialect`, so one parser reads both your syntax and standard files.
 
 ```zig
 var tree = try parser.parse(allocator, source, .{ .dialect = true });
@@ -198,7 +196,7 @@ A dialect lists its node kinds in a `Node` enum. Each of its nodes is an `ast.Di
 | [Traverser](/parser/traverse/)         | every mode walks dialect nodes, with `enter_dialect` and `exit_dialect` hooks                               |
 | [Codegen](/parser/codegen/)            | standard nodes print as always, and dialect nodes through `print`                                           |
 | [Comments](/parser/ast/#comments)      | attach to dialect nodes as to any node                                                                      |
-| [JavaScript](#javascript)              | dialect nodes decode in their shapes, walk, analyze, and print in Yuku's packages                           |
+| [JavaScript](#javascript)              | dialect nodes decode in their shapes, walk, analyze, and print in `yuku`                                    |
 
 A dialect lowers its nodes to standard ones with a transform pass of `exit_dialect` hooks, after which every tool reads plain JavaScript.
 
@@ -222,7 +220,7 @@ Without `print`, codegen reports a diagnostic for each dialect node it meets.
 
 ## [JavaScript]($section.id('javascript'))
 
-A language ships to JavaScript as its own WebAssembly build of Yuku, with its dialect compiled in, which Yuku's packages run. `addWasm` builds it in your repository.
+A dialect runs in JavaScript as a custom WebAssembly build of Yuku with the dialect compiled in, which `addWasm` builds.
 
 ```zig
 // build.zig
@@ -230,11 +228,11 @@ const yuku = b.dependency("yuku", .{ .dialect = b.path("src/pipeline.zig") });
 b.installArtifact(@import("yuku").addWasm(b, yuku, "pipeline"));
 ```
 
-`zig build` writes `zig-out/bin/pipeline.wasm`. Ship it in your package, and pass it to Yuku's packages as `wasm`.
+`zig build` writes `zig-out/bin/pipeline.wasm`. Ship it in your package, and pass it to `yuku` as the `wasm` option of `parse`, `analyze`, or `new Analyzer`.
 
 ```js
 import { readFileSync } from "node:fs";
-import { parse as yukuParse } from "yuku-parser";
+import { parse as yukuParse } from "yuku";
 
 const wasm = new WebAssembly.Module(readFileSync(new URL("./pipeline.wasm", import.meta.url)));
 
@@ -243,18 +241,18 @@ export function parse(source, options) {
 }
 ```
 
-The packages parse a file with the dialect when its `path` has an extension in `files`, and a source with no `path` as the first of `files`. Any other file, or one given a `lang`, parses as standard syntax, so one build reads a whole project.
-
 A browser compiles it with `await WebAssembly.compileStreaming(fetch(url))` instead.
 
-A dialect node decodes in its shape, `{ type: "PipelineExpression", left, right, start, end }`. [`yuku-ast`](https://www.npmjs.com/package/yuku-ast) walks it by its fields, and [`yuku-analyzer`](https://www.npmjs.com/package/yuku-analyzer) resolves the names inside it. [`yuku-codegen`](https://www.npmjs.com/package/yuku-codegen) prints them through its [`print`](https://www.npmjs.com/package/yuku-codegen#printing-new-nodes) option, with the same calls as the Zig printer.
+A file whose `path` ends in an extension in `files` parses with the dialect, in the language that entry names, and a source with no `path` parses as the first entry. Any other file, or one given a `lang`, parses as standard syntax, so one build reads a whole project.
+
+A dialect node decodes in its shape, `{ type: "PipelineExpression", left, right, start, end }`. [`yuku/ast`](/parser/ast/#js-walking) walks it by its fields, and [`yuku/analyzer`](/parser/semantic/#javascript) resolves the names inside it. [`yuku/codegen`](/parser/codegen/#javascript) prints them through its [`print`](/parser/codegen/#js-printing-new-nodes) option, with the same calls as the Zig printer.
 
 For TypeScript, declare your nodes in `DialectNodes`, which adds them to `Node`, so visitors and `node.type` checks know them.
 
 ```ts
-import type { BaseNode, Expression } from "@yuku-toolchain/types";
+import type { BaseNode, Expression } from "yuku/types";
 
-declare module "@yuku-toolchain/types" {
+declare module "yuku/types" {
   interface DialectNodes {
     PipelineExpression: BaseNode & { type: "PipelineExpression"; left: Expression; right: Expression };
     TopicReference: BaseNode & { type: "TopicReference" };
@@ -264,4 +262,4 @@ declare module "@yuku-toolchain/types" {
 
 ## [Cost]($section.id('cost'))
 
-Every position's call site sits behind a compile-time check, so a parser without a dialect carries no dialect code and parses as fast as before. With one compiled in, a source that does not opt in pays one predictable flag check per position, and one that does pays one call. A build with a dialect adds its shapes, a few hundred bytes, to each AST buffer. JavaScript reads them only from a buffer with dialect nodes, and parses them once per process.
+A parser built without a dialect has no dialect code, since every position sits behind a compile-time check. With one compiled in, a source that does not opt in pays one flag check per position, and one that does pays one call.

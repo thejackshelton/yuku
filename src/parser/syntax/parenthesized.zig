@@ -159,8 +159,7 @@ pub fn coverToParenthesizedExpression(
     );
 }
 
-/// Converts the cover into a non-async `ArrowFunctionExpression`.
-/// Async and TypeScript arrows go through `parseArrow` instead.
+// async and TypeScript arrows go through `parseArrow` instead
 pub fn coverToArrowFunction(
     parser: *Parser,
     cover: ParenthesizedCover,

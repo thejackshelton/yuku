@@ -1,0 +1,91 @@
+import type {
+  BigIntLiteral,
+  BooleanLiteral,
+  ComputedMemberExpression,
+  Directive,
+  Identifier,
+  Node,
+  NodeOfType,
+  NodeType,
+  NullLiteral,
+  NumericLiteral,
+  PrivateFieldExpression,
+  RegExpLiteral,
+  StandardNodeType,
+  StaticMemberExpression,
+  StringLiteral,
+} from "../types";
+import { ALIAS_GROUPS, type AliasMap, type AliasName } from "./aliases";
+import { NODE_TYPES } from "./generated";
+
+export type MaybeNode = Node | null | undefined;
+
+// NODE_TYPES must match StandardNodeType exactly
+type _missing = Record<Exclude<StandardNodeType, (typeof NODE_TYPES)[number]>, never>;
+type _extra = Record<Exclude<(typeof NODE_TYPES)[number], StandardNodeType>, never>;
+const _exhaustive: [_missing, _extra] = [{}, {}];
+void _exhaustive;
+
+type ConcreteGuards = { [K in StandardNodeType]: (node: MaybeNode) => node is NodeOfType<K> };
+
+type AliasGuards = { [K in AliasName]: (node: MaybeNode) => node is AliasMap[K] };
+
+const concrete = Object.fromEntries(
+  NODE_TYPES.map((type) => [type, (node: MaybeNode) => node != null && node.type === type]),
+) as ConcreteGuards;
+
+const aliases = Object.fromEntries(
+  (Object.keys(ALIAS_GROUPS) as AliasName[]).map((name) => {
+    const types = new Set<string>(ALIAS_GROUPS[name]);
+    return [name, (node: MaybeNode) => node != null && types.has(node.type)];
+  }),
+) as AliasGuards;
+
+const shapes = {
+  /** True when `node.type` is one of `types`, narrowing to that union. */
+  oneOf: <const K extends NodeType>(node: MaybeNode, types: readonly K[]): node is NodeOfType<K> =>
+    node != null && (types as readonly string[]).includes(node.type),
+
+  /** An `Identifier`, optionally with the exact `name`. */
+  Identifier: (node: MaybeNode, name?: string): node is Identifier =>
+    node?.type === "Identifier" && (name === undefined || node.name === name),
+
+  StringLiteral: (node: MaybeNode): node is StringLiteral =>
+    node?.type === "Literal" && typeof node.value === "string",
+  NumericLiteral: (node: MaybeNode): node is NumericLiteral =>
+    node?.type === "Literal" && typeof node.value === "number",
+  BooleanLiteral: (node: MaybeNode): node is BooleanLiteral =>
+    node?.type === "Literal" && typeof node.value === "boolean",
+  NullLiteral: (node: MaybeNode): node is NullLiteral =>
+    node?.type === "Literal" && node.raw === "null",
+  BigIntLiteral: (node: MaybeNode): node is BigIntLiteral =>
+    node?.type === "Literal" && "bigint" in node,
+  RegExpLiteral: (node: MaybeNode): node is RegExpLiteral =>
+    node?.type === "Literal" && "regex" in node,
+
+  ComputedMemberExpression: (node: MaybeNode): node is ComputedMemberExpression =>
+    node?.type === "MemberExpression" && node.computed,
+  StaticMemberExpression: (node: MaybeNode): node is StaticMemberExpression =>
+    node?.type === "MemberExpression" && !node.computed && node.property.type === "Identifier",
+  PrivateFieldExpression: (node: MaybeNode): node is PrivateFieldExpression =>
+    node?.type === "MemberExpression" && node.property.type === "PrivateIdentifier",
+
+  Directive: (node: MaybeNode): node is Directive =>
+    node?.type === "ExpressionStatement" && node.directive != null,
+};
+
+/**
+ * Type guards, one per concrete node `type` plus alias and shape
+ * guards. Every guard accepts `null` and `undefined` and narrows.
+ *
+ * @example
+ * is.CallExpression(node)
+ * is.Identifier(node, "require")
+ * is.Expression(node)
+ * is.StringLiteral(node)
+ */
+export const is: Omit<ConcreteGuards, keyof typeof shapes> & AliasGuards & typeof shapes = {
+  ...concrete,
+  ...aliases,
+  ...shapes,
+};

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { parse } from "yuku-parser";
-import * as browser from "../../npm/yuku-parser/module/browser.js";
+import { parse } from "yuku";
+import * as browser from "../../packages/yuku/dist/module/browser.js";
 
 test("the browser entry loads the module", async () => {
   await browser.ready;

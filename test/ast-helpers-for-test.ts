@@ -1,4 +1,4 @@
-import type { Diagnostic } from "yuku-parser";
+import type { Diagnostic } from "yuku";
 
 const BIG_INT_PREFIX = "(BigInt) ";
 const REGEXP_PREFIX = "(RegExp) ";

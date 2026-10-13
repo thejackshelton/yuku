@@ -1,8 +1,8 @@
 // the semantic model of every corpus and project file holds each invariant
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { Analyzer, BindingFlags, type Module, type Scope } from "yuku-analyzer";
-import type { Node, SourceType } from "yuku-parser";
+import { Analyzer, BindingFlags, type Module, type Scope } from "yuku/analyzer";
+import type { Node, SourceType } from "yuku";
 import { corpusAndProjectFiles, corpusPresent, forEachCorpusFile } from "../corpus";
 
 const SAMPLE_MAX = 8;

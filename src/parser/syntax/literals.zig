@@ -116,15 +116,12 @@ fn parseTemplateSubstitution(parser: *Parser) Error!?ast.NodeIndex {
     return expressions.parseExpression(parser, Precedence.Lowest, .{});
 }
 
-/// The pieces of a template with substitutions, through its closing backtick.
 pub const TemplateParts = struct {
     quasis: ast.IndexRange,
     substitutions: ast.IndexRange,
     end: u32,
 };
 
-/// Parses a template from its head through its tail. `parseSubstitution` parses each `${}`
-/// body, and `noun` names that body in diagnostics.
 pub fn parseTemplateParts(
     parser: *Parser,
     tagged: bool,
@@ -265,7 +262,6 @@ pub fn parseIdentifierName(parser: *Parser) Error!?ast.NodeIndex {
     return try addIdentifierName(parser, token);
 }
 
-/// Adds an `IdentifierName` node for `token`, which the caller consumes.
 pub fn addIdentifierName(parser: *Parser, token: Token) Error!ast.NodeIndex {
     std.debug.assert(token.tag.isIdentifierLike());
     return parser.tree.addNode(

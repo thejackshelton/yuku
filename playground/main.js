@@ -1,6 +1,6 @@
-import { parse, ready, TokenKind } from "yuku-parser";
-import { generate } from "yuku-codegen";
-import { analyze, BindingFlags } from "yuku-analyzer";
+import { parse, ready, TokenKind } from "yuku";
+import { generate } from "yuku/codegen";
+import { analyze, BindingFlags } from "yuku/analyzer";
 import { CodeJar } from "https://esm.sh/codejar@4.2.0";
 import hljs from "https://esm.sh/highlight.js@11.10.0/lib/core";
 import typescript from "https://esm.sh/highlight.js@11.10.0/lib/languages/typescript";
@@ -729,7 +729,7 @@ function render() {
     astView.replaceChildren(
       result.tokens
         ? tokenList(result.tokens)
-        : el("div", "sem-err", "this yuku-parser has no tokens"),
+        : el("div", "sem-err", "this version of yuku has no tokens"),
     );
   } else {
     astView.replaceChildren(
@@ -1156,18 +1156,18 @@ async function showVersion() {
   const pr = new URLSearchParams(location.search).get("pr");
   if (pr) {
     label.textContent = `pr ${pr.slice(0, 7)}`;
-    label.title = `preview packages of yuku-toolchain/yuku@${pr}`;
+    label.title = `the preview package of yuku-toolchain/yuku@${pr}`;
     return;
   }
   try {
-    const url = import.meta.resolve("yuku-parser");
+    const url = import.meta.resolve("yuku");
     const res = await fetch(url);
     const match = res.headers.get("x-esm-path")?.match(/@(\d[^/]*)/);
     if (match) {
       label.textContent = match[1];
       return;
     }
-    const { version } = await (await fetch(new URL("./package.json", url))).json();
+    const { version } = await (await fetch(new URL("../package.json", url))).json();
     if (version) label.textContent = version;
   } catch {}
 }

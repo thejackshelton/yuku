@@ -147,8 +147,7 @@ fn isSourceFile(basename: []const u8) bool {
     return false;
 }
 
-/// Calls `check(path, &tree)` for every corpus file that parses cleanly, or skips the test
-/// when no corpus file does.
+// skips the test when no corpus file parses cleanly
 pub fn forEachCorpusTree(check: anytype) !void {
     const gpa = testing.allocator;
     const io = testing.io;

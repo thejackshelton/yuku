@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    name: Release Packages
+    name: Release
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh creates the GitHub Release
@@ -48,9 +48,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Verify lockfile workspace versions
-        run: bun .github/scripts/check-lock-versions.ts
-
       # before the build, so a tag without notes fails early
       - name: Read the release notes
         run: bun .github/scripts/release-notes.ts "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
@@ -58,7 +55,7 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Publish packages to npm
+      - name: Publish to npm
         run: bun .github/scripts/publish.ts
 
       - name: Create the GitHub release

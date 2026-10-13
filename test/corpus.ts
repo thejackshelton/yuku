@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import { Glob } from "bun";
-import { langFromPath, sourceTypeFromPath, type SourceLang, type SourceType } from "yuku-parser";
+import { langFromPath, sourceTypeFromPath, type SourceLang, type SourceType } from "yuku";
 import { PROJECTS, PROJECTS_DIR, type Project } from "./projects/manifest";
 
 export const CORPUS_DIRS = [

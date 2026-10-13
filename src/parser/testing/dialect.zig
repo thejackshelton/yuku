@@ -1,5 +1,3 @@
-//! A dialect that claims input at every position, and the tests of the dialect mechanism.
-
 const std = @import("std");
 const parser = @import("parser");
 
@@ -45,7 +43,6 @@ pub const Node = enum {
     }
 };
 
-/// `each (item of list) { statements }` and `assert expression;`.
 pub fn statement(p: *Parser) Error!Claim {
     const token = p.token();
     if (!token.tag.isIdentifierLike()) return .decline;
@@ -56,7 +53,6 @@ pub fn statement(p: *Parser) Error!Claim {
     return .decline;
 }
 
-/// `%`, the topic of a pipeline.
 pub fn expression(p: *Parser) Error!Claim {
     const token = p.token();
     if (token.tag != .percent) return .decline;
@@ -64,10 +60,9 @@ pub fn expression(p: *Parser) Error!Claim {
     return claimed(try p.addNode(.topic, &.{}, token.span));
 }
 
-/// `left |> right`, at assignment precedence and grouping left to right, and a `(` that starts
-/// a line starts a statement.
 pub fn operator(p: *Parser, left: NodeIndex, precedence: u8) Error!Claim {
     const token = p.token();
+    // a `(` that starts a line starts a statement
     if (token.tag == .left_paren and token.hasLineTerminatorBefore()) return .end;
     if (!std.mem.startsWith(u8, p.source()[token.span.start..], "|>")) return .decline;
     if (precedence > ast.Precedence.Assignment) return .end;
@@ -78,7 +73,6 @@ pub fn operator(p: *Parser, left: NodeIndex, precedence: u8) Error!Claim {
     return claimed(try p.addNode(.pipeline, &.{ left, right }, span));
 }
 
-/// `= expression` as the body of a function or method.
 pub fn function_body(p: *Parser) Error!Claim {
     const start = p.token().span.start;
     if (p.token().tag != .assign) return .decline;
@@ -89,7 +83,6 @@ pub fn function_body(p: *Parser) Error!Claim {
     return claimed(try p.addNode(.expression_body, &.{value}, span));
 }
 
-/// The body of `<raw>` as text, and `@(expression)`, `@<element>`, and comments in text.
 pub fn jsx_child(p: *Parser, offset: u32, parent: NodeIndex) Error!Claim {
     const source = p.source();
     if (offset == p.tree().span(parent).end and isRaw(p.tree(), parent)) {
@@ -138,7 +131,6 @@ pub fn jsx_child(p: *Parser, offset: u32, parent: NodeIndex) Error!Claim {
     return claimed(try p.addJsxText(.{ .start = offset, .end = end }));
 }
 
-/// `{name}`, short for `name={name}`.
 pub fn jsx_attribute(p: *Parser) Error!Claim {
     const start = p.checkpoint();
     if (try p.parseJsxExpressionContainer()) |container| {
@@ -151,13 +143,11 @@ pub fn jsx_attribute(p: *Parser) Error!Claim {
     return .decline;
 }
 
-/// `<{expression}>`, an element named at runtime.
 pub fn jsx_element_name(p: *Parser) Error!Claim {
     if (p.token().tag != .left_brace) return .decline;
     return claimed(try p.parseJsxExpressionContainer() orelse return .failed);
 }
 
-/// A module named by an identifier, as in `import { range } from std`.
 pub fn module_specifier(p: *Parser) Error!Claim {
     const token = p.token();
     if (token.tag != .identifier) return .decline;

@@ -1,5 +1,5 @@
-import { parse, type ParseOptions, type SourceLang } from "yuku-parser";
-import { generate, type GenerateOptions } from "yuku-codegen";
+import { parse, type ParseOptions, type SourceLang } from "yuku";
+import { generate, type GenerateOptions } from "yuku/codegen";
 
 export function gen(
   source: string,

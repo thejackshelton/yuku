@@ -28,7 +28,6 @@ pub const Checker = struct {
     // kinds of the module-level names a ts module declares without `export`
     local_kinds: std.StringHashMapUnmanaged(Symbol.Flags) = .empty,
     export_specifiers: std.ArrayList(ExportSpecifierInfo) = .empty,
-    // names of the plain functions declared in sloppy scopes
     plain_functions: std.AutoHashMapUnmanaged(ast.NodeIndex, void) = .empty,
 
     // every export of one name, which ts judges once all are known
@@ -313,9 +312,6 @@ pub const Checker = struct {
     }
 
     // where a function declaration may stand, labelled (14.13.1, B.3.1) or as an if body (B.3.3)
-    // https://tc39.es/ecma262/#sec-labelled-statements-static-semantics-early-errors
-    // https://tc39.es/ecma262/#sec-if-statement-static-semantics-early-errors
-    // https://tc39.es/ecma262/#sec-functiondeclarations-in-ifstatement-statement-clauses
     pub fn enter_function(
         self: *Self,
         func: ast.Function,
@@ -1073,7 +1069,6 @@ pub const Checker = struct {
         "package", "protected", "interface", "implements",
     };
 
-    // per length, a bit for the first letter of each word that long
     const strict_reserved_initials = blk: {
         var table: [11]u32 = @splat(0);
         for (strict_reserved) |word| table[word.len] |= 1 << (word[0] - 'a');
@@ -1287,7 +1282,6 @@ pub const Checker = struct {
     }
 
     const LabelSearch = union(enum) {
-        // the body of the labelled statement
         found: ast.NodeIndex,
         not_found,
         crossed_boundary,

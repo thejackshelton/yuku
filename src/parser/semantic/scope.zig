@@ -222,8 +222,6 @@ pub const ScopeTracker = struct {
             .block_statement => {
                 // a catch body shares the parameter scope so 14.15.1 conflicts surface,
                 // unless a parameter expression runs before the body exists (14.15.2)
-                //   catch (e)       { let e }   // shared, conflict found
-                //   catch ([e = 1]) { let e }   // split, the default must not see the let
                 const current = self.tree.data(self.currentScope().node);
                 const shares_catch_scope = current == .catch_clause and
                     current.catch_clause.body == index and
@@ -383,7 +381,6 @@ pub const ScopeTracker = struct {
         return self.toScopeTree().ancestors(start);
     }
 
-    /// The scopes pushed so far, as a `ScopeTree`.
     pub inline fn toScopeTree(self: *const ScopeTracker) ScopeTree {
         return .{ .list = self.scopes.items };
     }

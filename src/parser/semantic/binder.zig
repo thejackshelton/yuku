@@ -608,7 +608,6 @@ const Bodies = struct {
     }
 };
 
-// hashes a name once for its lookups in every scope of the chain
 const PrehashedContext = struct {
     hash_value: u64,
 
@@ -1045,8 +1044,6 @@ pub const SymbolTracker = struct {
                 }
             },
             // member names are not binding identifiers, and tsc resolves them lexically
-            //   enum E { a, b = a }
-            //   //              ^ the member
             .ts_enum_member => |member| {
                 if (member.computed) return;
                 const name = switch (self.tree.data(member.id)) {

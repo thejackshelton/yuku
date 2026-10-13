@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parse, type Expression } from "yuku-parser";
+import { parse, type Expression } from "yuku";
 import {
   b,
   bindingIdentifiers,
@@ -16,7 +16,7 @@ import {
   literalValue,
   nameOf,
   unwrap,
-} from "yuku-ast";
+} from "yuku/ast";
 
 function program(source: string) {
   return parse(source, { sourceType: "module", lang: "ts" }).program;

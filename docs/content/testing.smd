@@ -1,6 +1,6 @@
 ---
 .title = "Testing",
-.description = "How Yuku is tested: the parser test suite, exact AST validation, codegen conformance, semantic analysis against TypeScript, and fuzzing.",
+.description = "How Yuku is tested.",
 .author = "Arshad Yaseen",
 .date = @date("2026-07-14T00:00:00"),
 .layout = "page.shtml",
@@ -17,9 +17,9 @@ The parser runs against [parser-test-suite](https://github.com/yuku-toolchain/pa
 | `fail`     | Produces a syntax error                                              |
 | `semantic` | Parses, then fails semantic analysis with an early error             |
 
-The snapshots come from an independent parser, [Oxc](https://oxc.rs), so a match means Yuku produces the tree the ESTree ecosystem agrees on, down to every field, position, and comment. Passing files must also walk in source order and pass semantic analysis without a false positive. Yuku passes every test, with zero failures and zero AST mismatches.
+The snapshots come from an independent parser, [Oxc](https://oxc.rs), and must match down to every field, position, and comment. Passing files must also walk in source order and pass semantic analysis without a false positive. Yuku passes every test, with zero failures and zero AST mismatches.
 
-The suite runs through the npm packages built from local source, so every run checks the whole chain from the Zig parser to the JavaScript AST.
+The suite runs through the `yuku` package built from local source, so every run checks the whole chain from the Zig parser to the JavaScript AST.
 
 ## [Codegen]($section.id('codegen'))
 
@@ -27,13 +27,13 @@ Every parseable file in the suite is printed under several option sets. Each out
 
 ## [Semantic analysis]($section.id('semantic-analysis'))
 
-Every file in the suite is analyzed, along with eight real codebases pinned to a commit: the TypeScript compiler, Vue, Svelte, Preact, three.js, Zod, date-fns, and Excalidraw. The TypeScript checker must resolve every reference, values and types alike, to the same declaration Yuku does, and [@typescript-eslint/scope-manager](https://typescript-eslint.io/packages/scope-manager) must agree on every runtime reference and write, and on every declaration and its scope, over a million comparisons each.
+Every file in the suite is analyzed, along with real codebases pinned to a commit, such as the TypeScript compiler, Node.js, Vue, and three.js. The TypeScript checker must resolve every reference, values and types alike, to the same declaration Yuku does. [@typescript-eslint/scope-manager](https://typescript-eslint.io/packages/scope-manager) must agree on every runtime reference and write, and on every declaration and its scope. Each runs over a million comparisons.
 
 Each codebase is also linked as one project, and every import, re-export, exported name, and relative path must resolve as in a TypeScript program.
 
 ## [Fuzzing]($section.id('fuzzing'))
 
-A fuzzer throws millions of adversarial inputs at the parser in every language mode, with out-of-memory failures injected along the way. The parser must never crash, any failure dumps a self-contained reproducer, and with everything in one arena, a parse has nothing to leak even when memory runs out.
+A fuzzer throws millions of adversarial inputs at the parser in every language mode, with out-of-memory failures injected along the way. The parser must never crash, and any failure dumps a self-contained reproducer. With everything in one arena, a parse has nothing to leak even when memory runs out.
 
 ## [Running the suites]($section.id('running-the-suites'))
 

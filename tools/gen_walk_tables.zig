@@ -1,5 +1,3 @@
-// generates the yuku-ast walk tables
-
 const std = @import("std");
 const decoder = @import("estree/decoder.zig");
 const emit = @import("estree/emit.zig");

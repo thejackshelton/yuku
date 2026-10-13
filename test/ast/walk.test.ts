@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parse } from "yuku-parser";
-import { b, nameOf, walk, walkAsync } from "yuku-ast";
+import { parse } from "yuku";
+import { b, nameOf, walk, walkAsync } from "yuku/ast";
 
 function program(source: string) {
   return parse(source, { sourceType: "module", lang: "ts" }).program;

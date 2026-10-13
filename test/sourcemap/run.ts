@@ -7,8 +7,8 @@ import {
   type Node,
   type PrivateIdentifier,
   type Program,
-} from "yuku-parser";
-import { generate, type SourceMap } from "yuku-codegen";
+} from "yuku";
+import { generate, type SourceMap } from "yuku/codegen";
 import { TraceMap, originalPositionFor, type EncodedSourceMap } from "@jridgewell/trace-mapping";
 import { CORPUS_DIRS, corpusFilesUnder, loadedProjects } from "../corpus";
 

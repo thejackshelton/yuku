@@ -46,8 +46,6 @@ pub fn parseFunction(
     }
 
     // an expression's name follows its own yield and await rules, a declaration's the outer ones
-    //   (function* yield(){})        invalid
-    //   async function await(){}     valid in script code
     parser.context.yield = if (is_function_expression) is_generator else outer_yield_is_keyword;
     parser.context.await = if (is_function_expression) options.is_async else outer_await_is_keyword;
 
@@ -152,7 +150,7 @@ pub fn parseFunction(
 
 pub const BodyPresence = enum { required, optional };
 
-/// Returns `.null` when an optional body is absent.
+// `.null` when an optional body is absent
 pub inline fn parseFunctionBody(parser: *Parser, presence: BodyPresence) Error!?ast.NodeIndex {
     if (comptime dialect.has(.function_body)) {
         if (try parseDialectFunctionBody(parser)) |body| return body;

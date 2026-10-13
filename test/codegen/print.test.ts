@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { parse, type ParseOptions } from "yuku-parser";
-import { generate, type GenerateOptions } from "yuku-codegen";
+import { parse, type ParseOptions } from "yuku";
+import { generate, type GenerateOptions } from "yuku/codegen";
 import { astDiffPath } from "../ast-helpers-for-test";
 import { deepChains, gen, INSTANTIATIONS } from "./helpers";
 

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { analyze } from "yuku-analyzer";
-import { walk } from "yuku-ast";
-import { parse } from "yuku-parser";
+import { analyze } from "yuku/analyzer";
+import { walk } from "yuku/ast";
+import { parse } from "yuku";
 
 // Yuku with src/parser/testing/dialect.zig compiled in, which test:dialect builds
 const bytes = readFileSync(new URL("../../zig-out/dialect/bin/yuku.wasm", import.meta.url));

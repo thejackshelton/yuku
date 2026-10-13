@@ -1,5 +1,3 @@
-// generates tokens.d.ts for @yuku-toolchain/types, the TokenKind map the decoder exports
-
 const std = @import("std");
 const parser = @import("parser");
 const decoder = @import("estree/decoder.zig");

@@ -9,8 +9,8 @@ import {
   type Module,
   type Reference,
   type Scope,
-} from "yuku-analyzer";
-import type { Node } from "yuku-parser";
+} from "yuku/analyzer";
+import type { Node } from "yuku";
 
 function analyzeOne(source: string, options: AnalyzeOptions): Module {
   return analyze(source, { path: "input.ts", ...options });

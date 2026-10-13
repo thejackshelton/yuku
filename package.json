@@ -11,16 +11,16 @@
   },
   "funding": "https://github.com/sponsors/arshad-yaseen",
   "workspaces": [
-    "npm/**/*"
+    "packages/*"
   ],
   "engines": {
     "node": ">=18.0.0"
   },
   "scripts": {
     "test": "bun fetch:fixtures && bun run build && bun typecheck && bun test:parser && bun test:codegen && bun test:ast && bun test:analyzer && bun test:dialect && bun test:sourcemap && bun test:runtime",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit --project packages/yuku",
     "test:parser": "bun test/parser/run.ts && bun test test/parser",
-    "test:codegen": "bun run --cwd npm/yuku-codegen build && zig build codegen-reference && bun test test/codegen",
+    "test:codegen": "bun run --cwd packages/yuku build && zig build codegen-reference && bun test test/codegen",
     "test:ast": "bun test test/ast",
     "test:analyzer": "bun test test/analyzer",
     "test:dialect": "zig build wasm -Ddialect=src/parser/testing/dialect.zig --prefix zig-out/dialect && bun test test/dialect",
@@ -31,10 +31,9 @@
     "playground": "bun run build && bun playground/server.ts",
     "format": "zig fmt **/*.zig",
     "docs:llms": "bun docs/generate-llms.ts",
-    "build": "zig build wasm && cp ./zig-out/bin/yuku.wasm ./npm/yuku-parser/ && bun gen:npm",
+    "build": "zig build package && bun run --cwd packages/yuku build",
     "release:npm": "bun .github/scripts/release.ts",
-    "fetch:fixtures": "bun test/parser/load test/parser/suite && bun test/projects/load.ts",
-    "gen:npm": "zig build gen-token-types gen-parser-decoder gen-analyzer-decoder gen-walk-tables && cp ./zig-out/tokens.d.ts ./npm/yuku-types && cp ./zig-out/decode.js ./npm/yuku-parser && cp ./zig-out/decode-analyzer.js ./npm/yuku-analyzer/decode.js && cp ./zig-out/walk-tables.ts ./npm/yuku-ast/src/generated.ts && bun run --cwd npm/yuku-ast build && bun run --cwd npm/yuku-codegen build"
+    "fetch:fixtures": "bun test/parser/load test/parser/suite && bun test/projects/load.ts"
   },
   "devDependencies": {
     "@jridgewell/trace-mapping": "^0.3.31",
@@ -46,9 +45,6 @@
     "jest-diff": "^30.5.2",
     "pkg-pr-new": "0.0.88",
     "typescript": "^6.0.3",
-    "yuku-analyzer": "workspace:*",
-    "yuku-ast": "workspace:*",
-    "yuku-codegen": "workspace:*",
-    "yuku-parser": "workspace:*"
+    "yuku": "workspace:*"
   }
 }

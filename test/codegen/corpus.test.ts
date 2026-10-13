@@ -1,8 +1,8 @@
 // every plan reparses, keeps each comment, and is idempotent, and print and compact keep the AST
 
 import { beforeAll, describe, expect, test } from "bun:test";
-import { parse, type ParseOptions, type SourceLang } from "yuku-parser";
-import { generate, type GenerateOptions } from "yuku-codegen";
+import { parse, type ParseOptions, type SourceLang } from "yuku";
+import { generate, type GenerateOptions } from "yuku/codegen";
 import { astDiffPath } from "../ast-helpers-for-test";
 import {
   corpusAndProjectFiles,

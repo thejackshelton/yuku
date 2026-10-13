@@ -9,31 +9,23 @@
       document.documentElement.dataset.theme = localStorage.getItem("yuku-theme") || "dark";
     </script>
     <script>
-      // released packages, a commit's preview packages with `?pr=<commit>`, or the
-      // workspace builds under `bun playground`
       const pr = new URLSearchParams(location.search).get("pr")?.match(/^[0-9a-f]{7,40}$/)?.[0];
       const local = !pr && ["localhost", "127.0.0.1"].includes(location.hostname);
-      const packages = {
-        "yuku-parser": "yuku-parser/index.js",
-        "yuku-parser/wasm": "yuku-parser/wasm.js",
-        "yuku-codegen": "yuku-codegen/dist/index.js",
-        "yuku-analyzer": "yuku-analyzer/index.js",
-        "yuku-ast": "yuku-ast/dist/index.js",
+      const parts = {
+        "": "dist/index.js",
+        "/analyzer": "dist/analyzer.js",
+        "/codegen": "dist/codegen.js",
       };
-      // the packages import each other through this map, so all of them come from one source
-      const external = `?external=${Object.keys(packages).join(",")}`;
       const imports = {};
-      for (const [name, path] of Object.entries(packages)) {
-        imports[name] = local
+      for (const [subpath, path] of Object.entries(parts)) {
+        imports[`yuku${subpath}`] = local
           ? `/pkg/${path}`
           : pr
-            ? `https://esm.sh/pr/yuku-toolchain/yuku/${name}@${pr}${external}`
-            : `https://esm.sh/${name}${external}`;
+            ? `https://esm.sh/pr/yuku-toolchain/yuku/yuku@${pr}${subpath}`
+            : `https://esm.sh/yuku${subpath}`;
       }
-      // a browser resolves no package `imports`, so the workspace build maps its own
-      const scopes = local
-        ? { "/pkg/yuku-parser/": { "#module": "/pkg/yuku-parser/module/browser.js" } }
-        : {};
+
+      const scopes = local ? { "/pkg/": { "#module": "/pkg/dist/module/browser.js" } } : {};
       document.write(`<script type="importmap">${JSON.stringify({ imports, scopes })}<\/script>`);
     </script>
   </head>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Analyzer } from "yuku-analyzer";
+import { Analyzer } from "yuku/analyzer";
 import { definition, project } from "./utils/summarize";
 
 const VALUE_PROJECT = {

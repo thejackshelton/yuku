@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parse, TokenKind, type TokenList } from "yuku-parser";
+import { parse, TokenKind, type TokenList } from "yuku";
 
 type Span = { start: number; end: number };
 

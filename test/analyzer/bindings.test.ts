@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Analyzer, BindingFlags, type Module } from "yuku-analyzer";
+import { Analyzer, BindingFlags, type Module } from "yuku/analyzer";
 import { summary } from "./utils/summarize";
 
 function spaces(module: Module, name: string): [value: boolean, type: boolean] {

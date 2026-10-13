@@ -1,5 +1,5 @@
-// AST transfer format v11, little endian with no version byte. the decoder that
-// tools/estree/decoder.zig generates shares the layout of the extern structs below
+// AST transfer format v11, little endian with no version byte
+// the decoder tools/estree/decoder.zig generates shares the extern struct layouts below
 //
 // sections, in order
 //
@@ -111,7 +111,6 @@ pub const HDR_FIRST_NON_ASCII_U32: u32 = @offsetOf(Header, "first_non_ascii") / 
 pub const FLAG_TS: u32 = 1 << 0;
 pub const FLAG_ATTACHED_COMMENTS: u32 = 1 << 1;
 pub const FLAG_COMMENTS: u32 = 1 << 2;
-/// Semantic sections follow the diagnostics, unseen by decoders that stop there.
 pub const FLAG_SEMANTIC: u32 = 1 << 3;
 
 pub const NODE_FLAGS_OFFSET: u8 = @offsetOf(PackedNode, "flags");

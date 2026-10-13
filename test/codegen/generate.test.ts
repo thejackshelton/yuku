@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { parse, type Node, type Program } from "yuku-parser";
-import { generate, type Printer, type Printers } from "yuku-codegen";
-import { findAll, walk } from "yuku-ast";
+import { parse, type Node, type Program } from "yuku";
+import { generate, type Printer, type Printers } from "yuku/codegen";
+import { findAll, walk } from "yuku/ast";
 import { TraceMap, decodedMappings } from "@jridgewell/trace-mapping";
 import { gen } from "./helpers";
 

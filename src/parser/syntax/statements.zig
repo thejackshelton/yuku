@@ -85,7 +85,7 @@ pub fn parseStatement(parser: *Parser, options: ParseStatementOptions) Error!?as
     };
 }
 
-/// Parses the `Statement` body of a control statement, where a lexical declaration is an error.
+// the body of a control statement, where a lexical declaration is an error
 pub inline fn parseSingleStatement(parser: *Parser) Error!?ast.NodeIndex {
     return parseStatement(parser, .{ .can_be_single_statement_context = true });
 }
@@ -550,7 +550,7 @@ fn parseBreakOrContinueStatement(
     std.debug.assert(parser.current_token.tag == keyword);
     const start = parser.current_token.span.start;
     var end = parser.current_token.span.end;
-    try parser.advance() orelse return null; // consume the keyword
+    try parser.advance() orelse return null;
 
     var label: ast.NodeIndex = .null;
 

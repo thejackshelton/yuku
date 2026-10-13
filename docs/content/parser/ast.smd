@@ -1,26 +1,188 @@
 ---
 .title = "AST",
-.description = "The flat, data-oriented AST Yuku's parser produces, with its comments and tokens.",
+.description = "The AST Yuku's parser produces, and how to read, walk, build, and check it.",
 .author = "Arshad Yaseen",
 .date = @date("2026-06-23T00:00:00"),
 .layout = "page.shtml",
 ---
-The parser produces a flat, data-oriented tree. There are no boxed structs and no pointers to chase, every read is a tagged-union switch and a slice index, and `tree.deinit()` frees the whole tree at once.
+The parser produces an AST. In JavaScript it is an ESTree / TypeScript-ESTree tree of plain objects, and in Zig a flat tree in one arena.
 
-In JavaScript, [`yuku-parser`](https://www.npmjs.com/package/yuku-parser) returns the same tree as an ESTree / TypeScript-ESTree AST, and [`yuku-ast`](https://www.npmjs.com/package/yuku-ast) walks, builds, and checks it.
+## [JavaScript]($section.id('javascript'))
 
-## [Memory layout]($section.id('memory-layout'))
+The tree is [ESTree](https://github.com/estree/estree) for JavaScript and JSX, as [Acorn](https://www.npmjs.com/package/acorn) produces it, and [TypeScript-ESTree](https://www.npmjs.com/package/@typescript-eslint/typescript-estree) for TypeScript, matching [Oxc](https://oxc.rs) for both. It also carries stage 3 [decorators](https://github.com/tc39/proposal-decorators), the `phase` of [import defer](https://github.com/tc39/proposal-defer-import-eval) and [import source](https://github.com/tc39/proposal-source-phase-imports) on imports and `ImportExpression`, and `Program.hashbang`.
 
-Three arrays in one arena hold the whole tree.
+`yuku/types` has the TypeScript types of every node, comment, diagnostic, and token, listed in its [type definitions](https://github.com/yuku-toolchain/yuku/blob/main/packages/yuku/types/index.ts). `yuku` re-exports them, and a [dialect](/parser/dialect/#javascript) adds its nodes to them.
 
-```
-Tree
- nodes    every node, its payload and span stored as separate columns
- extras   child lists, as runs of node indices
- strings  text, sliced from the source or interned
+```ts
+import type { Expression, Identifier, Node, Statement } from "yuku";
 ```
 
-Four small types carry every reference inside it.
+`yuku/ast` walks, builds, and checks the tree, and works on an ESTree AST from any parser.
+
+### [Walking]($section.id('js-walking'))
+
+```js
+import { parse } from "yuku";
+import { walk } from "yuku/ast";
+
+const { program } = parse(source);
+
+walk(program, {
+  Identifier(node) {
+    console.log(node.name);
+  },
+  CallExpression: {
+    enter(node, ctx) {},
+    leave(node, ctx) {},
+  },
+  Function(node) {
+    // function declarations, expressions, and arrows
+  },
+  enter(node) {},
+});
+```
+
+Handlers are keyed by node `type`, by alias group, or by the universal `enter` / `leave`, and receive the exact node type. The alias groups are `Expression`, `Statement`, `Declaration`, `ModuleDeclaration`, `Function`, `Class`, `Method`, `Loop`, `Pattern`, `JSX`, and `TSType`. Per node, the order is the universal `enter`, alias enters, the typed enter, the children, then the same in reverse for leave.
+
+An optional third argument passes state to every handler as `ctx.state`. `walkAsync` walks in the same order and awaits every handler. [`module.walk`](/parser/semantic/#js-walking) from `yuku/analyzer` adds the semantic model to the context.
+
+#### [The context]($section.id('js-walk-context'))
+
+One context object is reused across the whole walk, so do not store it.
+
+```js
+ctx.node;        // the current node
+ctx.parent;      // its parent, or null at the walk root
+ctx.key;         // the field on the parent holding this node
+ctx.index;       // position in an array field, or null
+ctx.ancestors(); // a copy of the ancestor chain, root first
+```
+
+#### [Mutation]($section.id('js-mutation'))
+
+Handlers can mutate the AST in place.
+
+| Operation                | Effect                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `ctx.skip()`             | Do not descend into this node's children. `leave` still fires.                                                |
+| `ctx.stop()`             | End the walk immediately.                                                                                     |
+| `ctx.replace(node)`      | Swap the current node. The walk continues into the replacement's children and `leave` fires for its new type. |
+| `ctx.remove()`           | Splice the node out of an array field, or null a plain field. Children are not walked, `leave` does not fire. |
+| `ctx.insertBefore(node)` | Insert a sibling before the current node in an array field. The inserted node is not visited.                 |
+| `ctx.insertAfter(node)`  | Insert a sibling after the current node in an array field. The walk visits it.                                |
+
+A replacement with `start: 0, end: 0`, such as a [builder](#js-builders) node, takes the original node's span, so [source maps](/parser/codegen/#js-source-maps) still point at the original code.
+
+```js
+walk(program, {
+  DebuggerStatement(node, ctx) {
+    ctx.remove();
+  },
+});
+```
+
+#### [findAll]($section.id('js-find-all'))
+
+`findAll` collects every node of the given types, in source order.
+
+```js
+import { findAll } from "yuku/ast";
+
+findAll(program, "CallExpression");
+findAll(program, ["ClassDeclaration", "TSInterfaceDeclaration"]);
+```
+
+`CHILD_KEYS` maps each node type to its child fields in traversal order, for walkers of your own.
+
+### [Builders]($section.id('js-builders'))
+
+`b` has one typed constructor per node type. Spans default to 0, which `ctx.replace` fills from the replaced node.
+
+```js
+import { b } from "yuku/ast";
+
+b.CallExpression({ callee: b.Identifier({ name: "f" }), arguments: [], optional: false });
+```
+
+### [Guards]($section.id('js-guards'))
+
+`is` has one guard per node type, per alias group, and for the shapes ESTree folds into one type: literal kinds, member expression kinds, and directives. Every guard accepts `null` and `undefined` and narrows.
+
+```js
+import { is } from "yuku/ast";
+
+is.CallExpression(node);
+is.Identifier(node, "require");
+is.oneOf(node, ["FunctionDeclaration", "ClassDeclaration"]);
+is.Expression(node);
+is.StringLiteral(node);
+is.StaticMemberExpression(node);
+is.Directive(node);
+```
+
+### [Imports and exports]($section.id('js-imports-and-exports'))
+
+`collectImports` and `collectExports` read a module's import and export declarations, one record per bound name, destructuring included.
+
+```js
+import { collectExports, collectImports } from "yuku/ast";
+
+for (const record of collectImports(program)) {
+  record.source;   // "./m"
+  record.local;    // the local binding name
+  record.imported; // "default", "*", or the export name
+  record.typeOnly; // import type / import { type x }
+  record.phase;    // "source" | "defer" | null
+}
+
+for (const record of collectExports(program)) {
+  record.exported; // the exported name, null for a bare export *
+  record.local;    // the backing local name, when there is one
+  record.source;   // the re-export specifier, when there is one
+  record.typeOnly;
+}
+```
+
+`collectImportDeclaration` and `collectExportDeclaration` return the records of a single statement, for use inside a walk.
+
+```js
+walk(program, {
+  ImportDeclaration(node) {
+    records.push(...collectImportDeclaration(node));
+  },
+});
+```
+
+These read the syntax of one file. [`yuku/analyzer`](/parser/semantic/#js-imports-and-exports) resolves them to bindings and links them across files.
+
+### [Utilities]($section.id('js-utilities'))
+
+```js
+import {
+  bindingIdentifiers, // every binding Identifier a pattern introduces
+  isCallOf,           // isCallOf(node, "require")
+  isWrapper,          // true for the wrappers unwrap strips
+  literalValue,       // string | number | boolean | bigint | RegExp | null
+  nameOf,             // Identifier name or string Literal value
+  unwrap,             // strips parens and erased TypeScript assertion wrappers
+} from "yuku/ast";
+```
+
+### [Identifier names]($section.id('js-identifier-names'))
+
+```js
+import { isIdentifierName, isValidIdentifier } from "yuku/ast";
+
+isValidIdentifier("foo");   // true
+isValidIdentifier("class"); // false, reserved
+isIdentifierName("class");  // true, syntactically an IdentifierName
+```
+
+Plus `isIdentifierStart`, `isIdentifierChar`, `isKeyword`, `isReservedWord`, `isStrictReservedWord`, `isStrictBindReservedWord`, and `isStrictBindOnlyReservedWord`.
+
+## [Zig]($section.id('zig'))
+
+The tree is flat. Nodes, child lists, and strings live in arrays in one arena, and `tree.deinit()` frees them all at once. Four types refer into it.
 
 | Type         | Is                                                                           |
 | ------------ | ---------------------------------------------------------------------------- |
@@ -40,7 +202,7 @@ tree.extra(range) // a list of child nodes
 tree.string(text) // the bytes of a string
 ```
 
-A payload is a `switch` away. Tags are snake_case, and [ast.zig](https://github.com/yuku-toolchain/yuku/blob/main/src/parser/ast.zig) defines every one with its fields.
+Tags are snake_case, and [ast.zig](https://github.com/yuku-toolchain/yuku/blob/main/src/parser/ast.zig) defines every one with its fields.
 
 ```zig
 switch (tree.data(idx)) {
@@ -75,11 +237,11 @@ const text = tree.sourceSlice(start, end);         // a String over the source, 
 try tree.addDiagnostic(.{ .message = "unused", .span = span });
 ```
 
-`ast.Tree.initEmpty(allocator)` starts a tree with no source, for output built from nothing. The [transform](/parser/traverse/#transform) traverser makes these changes during a walk.
+`ast.Tree.initEmpty(allocator)` starts a tree with no source. The [transform](/parser/traverse/#transform) traverser makes these changes during a walk.
 
 ## [Comments]($section.id('comments'))
 
-The `comments` option collects every comment into `tree.comments`, attaches each to its node, or both. An attached comment records whether it sits `before`, `after`, or `inside` its node, so comments move with their nodes through transforms and [codegen](/parser/codegen/) prints them in place.
+The `comments` option collects every comment into `tree.comments`, attaches each to its node, or both. An attached comment records whether it sits `before`, `after`, or `inside` its node, so it moves with its node through transforms and [codegen](/parser/codegen/) prints it in place.
 
 ```zig
 for (tree.commentsOf(idx)) |c| {

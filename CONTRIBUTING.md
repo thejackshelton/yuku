@@ -1,7 +1,6 @@
 # Contributing to Yuku
 
-Yuku is a JavaScript and TypeScript toolchain written in pure Zig: a parser, a
-code generator with source maps, and a semantic analyzer.
+Yuku is a JavaScript and TypeScript compiler toolchain written in Zig.
 
 ## Set up
 
@@ -30,13 +29,12 @@ It reruns on every save. For a browser playground, run `bun run playground`.
 bun run test
 ```
 
-This builds everything from your Zig and runs every suite, fetching the parser
-test suite and a few pinned open-source projects on the first run. To run a
-single one, use `test:parser`, `test:codegen`, `test:analyzer`,
-`test:sourcemap`, `test:ast`, `test:dialect`, or `test:runtime`, which runs every
-package with the `node` on your path. CI runs it on the minimum runtime, see
-AGENTS.md. After editing Zig, run `bun run build` first so the suites see your
-change.
+This builds everything and runs every suite, fetching the parser test suite and
+a few pinned open-source projects on the first run. To run a single one, use
+`test:parser`, `test:codegen`, `test:analyzer`, `test:sourcemap`, `test:ast`,
+`test:dialect`, or `test:runtime`, which runs the package with the `node` on
+your path. CI runs it on the minimum runtime, see AGENTS.md. After editing Zig,
+run `bun run build` first so the suites see your change.
 
 ### Add a test
 
@@ -52,7 +50,7 @@ checks, see [how Yuku is tested](https://yuku.fyi/testing/).
 ### Change the codegen
 
 The codegen has a Zig implementation, `src/parser/codegen/printer.zig`, and a
-JavaScript one, `npm/yuku-codegen/src/printer.ts`. They mirror each other
+JavaScript one, `packages/yuku/codegen/printer.ts`. They mirror each other
 function by function, so a change lands in both. `bun run test:codegen` prints
 the test corpus with each and fails on any difference.
 
@@ -67,9 +65,15 @@ src/parser/
   codegen/       print, strip, minify, source maps
   semantic/      scopes, symbols, references, early errors
   traverser/     AST visitors
-  ffi/           N-API and WebAssembly bindings
+  ffi/           WebAssembly bindings
   testing/       Zig tests and the fuzzer
-npm/             published packages
+packages/yuku/   the published package
+  core/          the WebAssembly and its loader per runtime
+  parser/        yuku
+  analyzer/      yuku/analyzer
+  ast/           yuku/ast
+  codegen/       yuku/codegen
+  types/         yuku/types
 test/            test suites
 docs/            the website
 ```

@@ -1,6 +1,3 @@
-//! Dialects add syntax to JavaScript, TypeScript, and JSX, see
-//! [Dialects](https://yuku.fyi/parser/dialect/).
-
 const std = @import("std");
 const ast = @import("ast.zig");
 const core = @import("parser.zig");
@@ -50,7 +47,7 @@ pub const Shape = struct {
     lexical_bindings: bool = false,
 };
 
-/// A kind of file a dialect parses, which its `files` declaration lists.
+/// A kind of file the dialect parses, listed in its `files`.
 pub const File = struct {
     /// The extension of the file's path, such as ".tsrx".
     extension: []const u8,
@@ -58,7 +55,7 @@ pub const File = struct {
     lang: ast.Lang,
 };
 
-/// The dialect's `Node` enum, the kind of each of its nodes.
+/// The dialect's `Node` enum.
 pub const Kind = if (@hasDecl(Bound, "Node")) Bound.Node else enum(u16) { _ };
 
 pub const bound = @typeInfo(Bound).@"struct".decl_names.len > 0;
@@ -74,7 +71,7 @@ pub inline fn has(comptime position: Position) bool {
     return @hasDecl(Bound, @tagName(position));
 }
 
-/// Null when the dialect declines, else the node it parsed, null after a diagnostic.
+// null when the dialect declines, a null node after a diagnostic
 pub inline fn at(
     comptime position: Position,
     inner: *core.Parser,
@@ -114,7 +111,6 @@ pub fn shape(kind: Kind) Shape {
     return kind.shape();
 }
 
-/// The dialect as JSON for the JavaScript packages, `{ files, shapes }`, empty without one.
 pub const description: []const u8 = if (bound) descriptionJson() else "";
 
 fn descriptionJson() []const u8 {
@@ -181,8 +177,8 @@ pub const Parser = struct {
         return self.inner.current_token;
     }
 
-    /// The token at or after `offset`, past whitespace and comments, lexed in the current lexer
-    /// mode without moving the parser or reporting a lexical error.
+    /// Lexes the token at or after `offset` in the current mode, without moving the parser or
+    /// reporting a lexical error.
     pub fn tokenAt(self: *const Parser, offset: u32) ast.Token {
         std.debug.assert(offset <= self.inner.source.len);
         var peek = self.inner.beginPeek();

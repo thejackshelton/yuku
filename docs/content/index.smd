@@ -1,51 +1,53 @@
 ---
 .title = "Introduction",
-.description = "Yuku is a high-performance JavaScript and TypeScript compiler toolchain written in Zig.",
+.description = "Yuku is a JavaScript and TypeScript compiler toolchain written in Zig.",
 .author = "Arshad Yaseen",
 .date = @date("2026-06-23T00:00:00"),
 .layout = "page.shtml",
 ---
-Yuku is a high-performance JavaScript and TypeScript compiler toolchain written in Zig, usable from Zig and from JavaScript through npm.
+Yuku is a JavaScript and TypeScript compiler toolchain written in Zig, for use from Zig and from JavaScript.
 
 [Try it in the playground →](https://playground.yuku.fyi)
 
 ## [Why Yuku]($section.id('why-yuku'))
 
-**Correct.** 100% ECMAScript spec compliant, with zero failures and zero AST mismatches across the [test suite](/testing/).
+**Correct.** Zero failures and zero AST mismatches across the [test suite](/testing/).
 
-**Fast.** Data-oriented from the ground up, with rigorous performance engineering.
+**Fast.** Built for speed, see [Performance](#performance).
 
-**Small.** A fraction of the install size of the alternatives, see [Size](#size).
+**Small.** One 1.1 MB package on npm, see [Size](#size).
 
-**Anywhere.** One WebAssembly build runs in Node.js, Bun, Deno, browsers, and edge runtimes, see [JavaScript](#javascript).
+**Anywhere.** Runs in Node.js, Bun, Deno, browsers, and edge runtimes, see [JavaScript](#javascript).
 
-**Zero dependencies.** Pure Zig, easy to build, embed, and cross-compile.
+**Zero dependencies.** Pure Zig, with no dependencies in the build or on npm.
 
-**Modern.** Full support for modern and experimental syntax, including decorators, source phase and deferred imports, and `using` declarations.
+**Modern.** Supports new and proposed syntax, including decorators, source phase and deferred imports, and `using` declarations.
 
 ---
 
 ># [About these docs]($block.attrs('note'))
->These pages cover the surface: what each part does and the API you build on. Beneath it is far more, a core built for exactness and speed down to the last detail. To go deeper, read the [source](https://github.com/yuku-toolchain/yuku/tree/main/src). It is typed and documented throughout, and it answers you or your coding agent more precisely than any guide could. Each npm package documents its complete JavaScript API in its README.
+>These pages cover each part of Yuku and its API, in JavaScript and in Zig. The [source](https://github.com/yuku-toolchain/yuku/tree/main/src) has the rest.
 
 ## [Install]($section.id('install'))
 
 ### [JavaScript]($section.id('javascript'))
 
-| Package                                                        | For                                              |
-| -------------------------------------------------------------- | ------------------------------------------------ |
-| [`yuku-parser`](https://www.npmjs.com/package/yuku-parser)     | Parsing to an ESTree / TypeScript-ESTree AST     |
-| [`yuku-analyzer`](https://www.npmjs.com/package/yuku-analyzer) | Scopes, bindings, references, and module linking |
-| [`yuku-codegen`](https://www.npmjs.com/package/yuku-codegen)   | Printing an AST back to source, with source maps |
+```bash
+npm install yuku
+```
 
-Each package documents its API in its README.
+| Import                                          | For                                               |
+| ----------------------------------------------- | ------------------------------------------------- |
+| [`yuku`](/parser/#javascript)                   | Parse to an ESTree / TypeScript-ESTree AST        |
+| [`yuku/analyzer`](/parser/semantic/#javascript) | Resolve scopes, bindings, references, and imports |
+| [`yuku/ast`](/parser/ast/#javascript)           | Walk, build, and check an AST                     |
+| [`yuku/codegen`](/parser/codegen/#javascript)   | Print an AST back to source, with source maps     |
+| [`yuku/types`](/parser/ast/#javascript)         | TypeScript types for the AST                      |
 
-The parser and analyzer run one WebAssembly build of Yuku, which comes with `yuku-parser`, so it downloads once however many tools you install. Toolchains with a native binary per tool repeat the parser in every one, so the gap widens with each tool Yuku adds.
-
-The packages run as they are in Node.js, Bun, Deno, browsers, and edge runtimes such as Cloudflare Workers. A browser compiles the WebAssembly after import, so it awaits `ready` once before the first parse.
+It runs in Node.js 18 or newer, Bun, Deno, Workers, and browsers with WebAssembly SIMD. A browser compiles the WebAssembly after import, so await `ready` before the first parse.
 
 ```js
-import { parse, ready } from "yuku-parser";
+import { parse, ready } from "yuku";
 
 await ready;
 parse("const x = 1;");
@@ -63,7 +65,7 @@ const yuku = b.dependency("yuku", .{ .target = target, .optimize = optimize });
 my_module.addImport("parser", yuku.module("parser"));
 ```
 
-Yuku requires Zig 0.17.0 or later.
+Yuku needs Zig 0.17.0 or later.
 
 ## [Performance]($section.id('performance'))
 
@@ -71,11 +73,11 @@ Measured against the alternatives doing the same work, on an Apple M3.
 
 ### [Parser]($section.id('parser-performance'))
 
-Parsing natively, Yuku is faster than Oxc and about 2× faster than SWC.
+Parsing natively, Yuku is faster than Oxc and SWC.
 
 ![Parsing `typescript.js` (7.8 MB) natively · [benchmark](https://github.com/yuku-toolchain/ecmascript-parser-benchmark-native)](https://raw.githubusercontent.com/yuku-toolchain/ecmascript-parser-benchmark-native/refs/heads/main/charts/typescript.png "Native benchmark comparing Yuku, Oxc, and SWC parsing typescript.js")
 
-On npm, Yuku parses 3–10× faster than the alternatives.
+On npm, Yuku parses faster than the alternatives.
 
 ![Parsing `react.js` (72 KB) on npm · [benchmark](https://github.com/yuku-toolchain/ecmascript-parser-benchmark-js)](https://raw.githubusercontent.com/yuku-toolchain/ecmascript-parser-benchmark-js/refs/heads/main/charts/react.png "npm benchmark comparing Yuku, Oxc, SWC, Babel, and Acorn parsing react.js")
 
@@ -85,7 +87,7 @@ The lead holds on large files.
 
 ### [Analyzer]($section.id('analyzer-performance'))
 
-Analyzing a whole codebase, with every reference resolved and every import linked across files, Yuku is 6–11× faster than typescript-eslint, and 3–6× faster than TypeScript through its API.
+Analyzing a whole codebase, resolving every reference and linking every import across files, Yuku is faster than typescript-eslint and the TypeScript API.
 
 ![Analyzing three.js (755 files) on npm · [benchmark](https://github.com/yuku-toolchain/ecmascript-analyzer-benchmark-js)](https://raw.githubusercontent.com/yuku-toolchain/ecmascript-analyzer-benchmark-js/refs/heads/main/charts/three.png "npm benchmark comparing Yuku, TypeScript, and typescript-eslint analyzing three.js")
 
@@ -95,10 +97,10 @@ The lead holds on a single large file.
 
 ## [Size]($section.id('size'))
 
-Installed with npm, dependencies included:
+Installed with npm, `yuku` is **1.1 MB** with no dependencies, and covers every task below. The alternatives, installed with their dependencies:
 
-| To                            | Yuku                       | Others                                                                                      |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
-| Parse                         | `yuku-parser` **830 kB**   | `oxc-parser` 4.7 MB, `@babel/parser` 4.8 MB, `@typescript-eslint/typescript-estree` 26.3 MB |
-| Analyze scopes and references | `yuku-analyzer` **1.0 MB** | `@typescript-eslint/typescript-estree` + `@typescript-eslint/scope-manager` 26.7 MB         |
-| Print an AST                  | `yuku-codegen` **210 kB**  | `astring` 270 kB, `@babel/generator` 2.5 MB                                                 |
+| To                            | Others                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| Parse                         | `oxc-parser` 4.7 MB, `@babel/parser` 4.8 MB, `@typescript-eslint/typescript-estree` 26.3 MB |
+| Analyze scopes and references | `@typescript-eslint/typescript-estree` + `@typescript-eslint/scope-manager` 26.7 MB         |
+| Print an AST                  | `astring` 270 kB, `@babel/generator` 2.5 MB                                                 |

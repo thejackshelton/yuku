@@ -49,13 +49,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build the npm packages
+      - name: Build the package
         run: bun run build
 
-      - name: Publish preview packages
-        run: bun run pkg-pr-new publish --compact --comment=off --json preview-packages.json './npm/*'
+      - name: Publish the preview package
+        run: bun run pkg-pr-new publish --compact --comment=off --json preview-packages.json ./packages/yuku
 
-      - name: Comment the preview packages
+      - name: Comment the preview package
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,7 +1,5 @@
 name: Zizmor
 
-# audits the workflows themselves, reporting to the Security tab
-
 on:
   push:
     branches: [main]
