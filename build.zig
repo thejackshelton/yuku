@@ -131,7 +131,6 @@ pub fn build(b: *std.Build) void {
     );
     codegen_reference_step.dependOn(&b.addInstallArtifact(codegen_reference, .{}).step);
 
-    // baseline WebAssembly runs everywhere, and SIMD and the later features measured no faster
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
