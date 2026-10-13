@@ -19,6 +19,7 @@ pub const Node = enum {
     interpolation,
     marked,
     shorthand,
+    rescue,
 
     pub fn shape(node: Node) dialect.Shape {
         return switch (node) {
@@ -27,6 +28,7 @@ pub const Node = enum {
                 .fields = &.{ "item", "list", "body[]" },
                 .block_scope = true,
                 .lexical_bindings = true,
+                .iteration = true,
             },
             .assertion => .{ .type = "AssertStatement", .fields = &.{"argument"} },
             .topic => .{ .type = "TopicReference" },
@@ -39,6 +41,12 @@ pub const Node = enum {
             .interpolation => .{ .type = "JSXInterpolation", .fields = &.{"expression"} },
             .marked => .{ .type = "JSXMarkedElement", .fields = &.{"element"} },
             .shorthand => .{ .type = "JSXShorthandAttribute", .fields = &.{"value"} },
+            .rescue => .{
+                .type = "RescueStatement",
+                .fields = &.{ "param", "body[]" },
+                .block_scope = true,
+                .catch_bindings = true,
+            },
         };
     }
 };
@@ -49,12 +57,16 @@ pub fn statement(p: *Parser) Error!Claim {
     const name = token.text(p.source());
     const next = p.tokenAt(token.span.end);
     if (std.mem.eql(u8, name, "each") and next.tag == .left_paren) return parseEach(p);
+    if (std.mem.eql(u8, name, "rescue") and next.tag == .left_paren) return parseRescue(p);
     if (std.mem.eql(u8, name, "assert") and next.tag.isIdentifierLike()) return parseAssertion(p);
     return .decline;
 }
 
 pub fn expression(p: *Parser) Error!Claim {
     const token = p.token();
+    if (token.tag == .at and std.mem.startsWith(u8, p.source()[token.span.end..], "<")) {
+        return parseMarked(p);
+    }
     if (token.tag != .percent) return .decline;
     if (!try p.advance()) return .failed;
     return claimed(try p.addNode(.topic, &.{}, token.span));
@@ -194,6 +206,13 @@ pub fn print(w: *dialect.Printer, kind: Node, children: []const NodeIndex) Error
             try w.node(children[0]);
         },
         .shorthand => try w.node(children[0]),
+        .rescue => {
+            try w.write("rescue (");
+            try w.node(children[0]);
+            try w.write(")");
+            try w.space();
+            try w.block(children[1..]);
+        },
     }
 }
 
@@ -204,18 +223,51 @@ fn parseEach(p: *Parser) Error!Claim {
     if (!try p.expect(.of, "Expected 'of' after the item of 'each'")) return .failed;
     const list = try p.parseExpression(ast.Precedence.Assignment) orelse return .failed;
     if (!try p.expect(.right_paren, "Expected ')' to close 'each'")) return .failed;
-    if (!try p.expect(.left_brace, "Expected '{' to open the body of 'each'")) return .failed;
 
     var children = p.list();
     defer children.reset();
     try children.append(item);
     try children.append(list);
+    const end = try parseBody(p, &children, "each") orelse return .failed;
+    return claimed(try p.addNode(.each, children.items(), .{ .start = start, .end = end }));
+}
+
+fn parseRescue(p: *Parser) Error!Claim {
+    const start = p.token().span.start;
+    if (!try p.advance() or !try p.expect(.left_paren, "Expected '(' after 'rescue'")) {
+        return .failed;
+    }
+    const param = try p.parseBindingPattern() orelse return .failed;
+    if (!try p.expect(.right_paren, "Expected ')' to close 'rescue'")) return .failed;
+
+    var children = p.list();
+    defer children.reset();
+    try children.append(param);
+    const end = try parseBody(p, &children, "rescue") orelse return .failed;
+    return claimed(try p.addNode(.rescue, children.items(), .{ .start = start, .end = end }));
+}
+
+// the statements of a `{ }` body, returning where it ends
+fn parseBody(p: *Parser, children: *const dialect.List, comptime name: []const u8) Error!?u32 {
+    if (!try p.expect(.left_brace, "Expected '{' to open the body of '" ++ name ++ "'")) {
+        return null;
+    }
     while (p.token().tag != .right_brace and p.token().tag != .eof) {
-        try children.append(try p.parseStatement() orelse return .failed);
+        try children.append(try p.parseStatement() orelse return null);
     }
     const end = p.token().span.end;
-    if (!try p.expect(.right_brace, "Expected '}' to close 'each'")) return .failed;
-    return claimed(try p.addNode(.each, children.items(), .{ .start = start, .end = end }));
+    if (!try p.expect(.right_brace, "Expected '}' to close '" ++ name ++ "'")) return null;
+    return end;
+}
+
+// `@<tag>…</tag>` as a value
+fn parseMarked(p: *Parser) Error!Claim {
+    const start = p.token().span.start;
+    if (!try p.seek(p.token().span.end)) return .failed;
+    const element = try p.parseJsxElement() orelse return .failed;
+    const span: ast.Span = .{ .start = start, .end = p.tree().span(element).end };
+    if (!try p.advance()) return .failed;
+    return claimed(try p.addNode(.marked, &.{element}, span));
 }
 
 fn parseAssertion(p: *Parser) Error!Claim {
@@ -253,6 +305,9 @@ const every_position =
     \\  assert item >= 0;
     \\  const value = item |> double(%);
     \\}
+    \\rescue (error) {
+    \\  assert error;
+    \\}
     \\const view = <{tag} {value}>a @(value) b @<i>c</i><raw>{not code}</raw></{tag}>;
 ;
 
@@ -278,6 +333,11 @@ fn initOf(tree: *const ast.Tree, statement_index: usize) NodeIndex {
     const declaration = tree.extra(tree.data(tree.root).program.body)[statement_index];
     const declarator = tree.extra(tree.data(declaration).variable_declaration.declarators)[0];
     return tree.data(declarator).variable_declarator.init;
+}
+
+fn exportedOf(tree: *const ast.Tree) NodeIndex {
+    const first = tree.extra(tree.data(tree.root).program.body)[0];
+    return tree.data(first).export_default_declaration.declaration;
 }
 
 test "every position claims its syntax" {
@@ -337,7 +397,9 @@ test "the dialect's files and node shapes reach the packages as JSON" {
     ++
         \\{"type":"JSXMarkedElement","fields":["element"],"list":-1,"properties":{}},
     ++
-        \\{"type":"JSXShorthandAttribute","fields":["value"],"list":-1,"properties":{}}]}
+        \\{"type":"JSXShorthandAttribute","fields":["value"],"list":-1,"properties":{}},
+    ++
+        \\{"type":"RescueStatement","fields":["param","body"],"list":1,"properties":{}}]}
     , dialect.description);
 }
 
@@ -398,4 +460,50 @@ test "codegen prints dialect nodes back to the source" {
     defer printed.deinit(testing.allocator);
 
     try testing.expectEqualStrings(every_position, printed.code);
+}
+
+test "a dialect loop is the target of break and continue" {
+    var tree = try parseSource("each (item of items) { if (item) continue; break; }", true);
+    defer tree.deinit();
+    _ = try parser.semantic.analyze(&tree);
+    try expectClean(&tree);
+
+    var crossing = try parseSource("each (item of items) { () => { continue; }; }", true);
+    defer crossing.deinit();
+    _ = try parser.semantic.analyze(&crossing);
+    try testing.expect(crossing.hasErrors());
+}
+
+test "a var redeclares a dialect catch binding while the binding is an identifier" {
+    var simple = try parseSource("rescue (error) { var error = 1; }", true);
+    defer simple.deinit();
+    _ = try parser.semantic.analyze(&simple);
+    try expectClean(&simple);
+
+    var pattern = try parseSource("rescue ({ message }) { var message = 1; }", true);
+    defer pattern.deinit();
+    _ = try parser.semantic.analyze(&pattern);
+    try testing.expect(pattern.hasErrors());
+}
+
+test "after export default, an @ the dialect reads is its expression, and else a decorator" {
+    var marked = try parseSource("export default @<i>c</i>;", true);
+    defer marked.deinit();
+    try expectClean(&marked);
+    try testing.expect(marked.data(exportedOf(&marked)) == .dialect);
+
+    var decorated = try parseSource("export default @dec class {}", true);
+    defer decorated.deinit();
+    try expectClean(&decorated);
+    try testing.expect(decorated.data(exportedOf(&decorated)) == .class);
+}
+
+test "a closing tag matches the dialect's tag by its expression, without comments" {
+    var tree = try parseSource("const a = <{tag /* opens */}>x</{ tag }>;", true);
+    defer tree.deinit();
+    try expectClean(&tree);
+
+    var mismatched = try parseSource("const a = <{a}>x</{b}>;", true);
+    defer mismatched.deinit();
+    try testing.expect(mismatched.hasErrors());
 }

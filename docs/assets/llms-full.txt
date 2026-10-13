@@ -1511,6 +1511,8 @@ pub const Node = enum {
 | `properties`       | `"{}"`  | A JSON object of constant properties every node of the kind has in JavaScript.                               |
 | `block_scope`      | `false` | The node opens a block scope.                                                                                |
 | `lexical_bindings` | `false` | Each binding identifier inside the node declares a `let`-like binding in the current scope.                  |
+| `catch_bindings`   | `false` | Each binding identifier inside the node declares a catch parameter, as in `catch (e) { var e }`.             |
+| `iteration`        | `false` | The node is a loop, which `break` and `continue` inside it end or skip.                                      |
 
 `addNode(kind, children, span)` adds a node. `children` follow `fields` in order, with `.null` for an absent part, and lie inside `span`. In Zig, the node is an `ast.Dialect`, with its `kind` and its `children` in source order, which `tree.extra(node.children)` reads.
 
@@ -1536,7 +1538,7 @@ In JavaScript, `yuku/codegen` prints your nodes through its [`print`](https://yu
 
 ## Analysis
 
-Semantic analysis walks into your nodes like any other node. Standard code inside them declares, resolves, and reports early errors as usual, and names inside them resolve to the bindings around them. `block_scope` and `lexical_bindings` decide what scope and bindings your node adds.
+Semantic analysis walks into your nodes like any other node. Standard code inside them declares, resolves, and reports early errors as usual, and names inside them resolve to the bindings around them. `block_scope`, `lexical_bindings`, and `catch_bindings` decide what scope and bindings your node adds, and `iteration` makes it a loop.
 
 ## Walking and lowering
 

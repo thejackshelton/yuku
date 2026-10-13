@@ -1,0 +1,179 @@
+{
+  "program": {
+    "type": "Program",
+    "start": 0,
+    "end": 173,
+    "sourceType": "module",
+    "hashbang": null,
+    "body": [
+      {
+        "type": "ImportDeclaration",
+        "start": 0,
+        "end": 28,
+        "specifiers": [
+          {
+            "type": "ImportDefaultSpecifier",
+            "start": 17,
+            "end": 18,
+            "local": {
+              "type": "Identifier",
+              "start": 17,
+              "end": 18,
+              "name": "a",
+              "decorators": [],
+              "typeAnnotation": null,
+              "optional": false
+            }
+          }
+        ],
+        "source": {
+          "type": "Literal",
+          "start": 24,
+          "end": 27,
+          "value": "a",
+          "raw": "\"a\""
+        },
+        "attributes": [],
+        "phase": null,
+        "importKind": "type"
+      },
+      {
+        "type": "ImportDeclaration",
+        "start": 29,
+        "end": 61,
+        "specifiers": [
+          {
+            "type": "ImportSpecifier",
+            "start": 48,
+            "end": 49,
+            "imported": {
+              "type": "Identifier",
+              "start": 48,
+              "end": 49,
+              "name": "b",
+              "decorators": [],
+              "optional": false,
+              "typeAnnotation": null
+            },
+            "local": {
+              "type": "Identifier",
+              "start": 48,
+              "end": 49,
+              "name": "b",
+              "decorators": [],
+              "typeAnnotation": null,
+              "optional": false
+            },
+            "importKind": "value"
+          }
+        ],
+        "source": {
+          "type": "Literal",
+          "start": 57,
+          "end": 60,
+          "value": "b",
+          "raw": "\"b\""
+        },
+        "attributes": [],
+        "phase": null,
+        "importKind": "type"
+      },
+      {
+        "type": "ImportDeclaration",
+        "start": 62,
+        "end": 95,
+        "specifiers": [
+          {
+            "type": "ImportNamespaceSpecifier",
+            "start": 79,
+            "end": 85,
+            "local": {
+              "type": "Identifier",
+              "start": 84,
+              "end": 85,
+              "name": "c",
+              "decorators": [],
+              "typeAnnotation": null,
+              "optional": false
+            }
+          }
+        ],
+        "source": {
+          "type": "Literal",
+          "start": 91,
+          "end": 94,
+          "value": "c",
+          "raw": "\"c\""
+        },
+        "attributes": [],
+        "phase": null,
+        "importKind": "type"
+      },
+      {
+        "type": "TSImportEqualsDeclaration",
+        "start": 96,
+        "end": 130,
+        "id": {
+          "type": "Identifier",
+          "start": 113,
+          "end": 114,
+          "name": "d",
+          "decorators": [],
+          "typeAnnotation": null,
+          "optional": false
+        },
+        "moduleReference": {
+          "type": "TSExternalModuleReference",
+          "start": 117,
+          "end": 129,
+          "expression": {
+            "type": "Literal",
+            "start": 125,
+            "end": 128,
+            "value": "d",
+            "raw": "\"d\""
+          }
+        },
+        "importKind": "type"
+      },
+      {
+        "type": "ExportNamedDeclaration",
+        "start": 131,
+        "end": 172,
+        "declaration": {
+          "type": "TSImportEqualsDeclaration",
+          "start": 138,
+          "end": 172,
+          "id": {
+            "type": "Identifier",
+            "start": 155,
+            "end": 156,
+            "name": "e",
+            "decorators": [],
+            "typeAnnotation": null,
+            "optional": false
+          },
+          "moduleReference": {
+            "type": "TSExternalModuleReference",
+            "start": 159,
+            "end": 171,
+            "expression": {
+              "type": "Literal",
+              "start": 167,
+              "end": 170,
+              "value": "e",
+              "raw": "\"e\""
+            }
+          },
+          "importKind": "type"
+        },
+        "specifiers": [],
+        "source": null,
+        "attributes": [],
+        "exportKind": "value"
+      }
+    ]
+  },
+  "comments": [],
+  "diagnostics": []
+}

@@ -1,8 +1,8 @@
 test/parser/misc/ts
 ===================
-Passed:       98/98 (100.00%)
+Passed:       104/104 (100.00%)
 Failed:       0
-AST mismatch: 0/98
+AST mismatch: 0/104
 
 ✓ test/parser/misc/ts/abstract-constructor-body.ts
 error: Constructor cannot be abstract
@@ -15,6 +15,7 @@ error: Constructor cannot be abstract
    = help: Remove the 'abstract' modifier. Only methods and properties can be abstract.
 
 
+✓ test/parser/misc/ts/abstract-declare-class.ts
 ✓ test/parser/misc/ts/ambient-file-declarations.module.d.ts
 ✓ test/parser/misc/ts/ambient-reserved-param.ts
 ✓ test/parser/misc/ts/arrow-return-type-ternary-colon-steal.ts
@@ -114,9 +115,12 @@ error: Expected 'class' keyword, but found 'abstract'
 
 ✓ test/parser/misc/ts/decorated-abstract-class-heritage.ts
 ✓ test/parser/misc/ts/decorated-abstract-class.ts
+✓ test/parser/misc/ts/decorated-declare-class.ts
 ✓ test/parser/misc/ts/decorated-export-abstract-class.module.ts
+✓ test/parser/misc/ts/decorated-export-declare-class.module.ts
 ✓ test/parser/misc/ts/decorated-export-default-abstract-class-named.module.ts
 ✓ test/parser/misc/ts/decorated-export-default-abstract-class.module.ts
+✓ test/parser/misc/ts/decorated-export-default-declare-class.module.ts
 ✓ test/parser/misc/ts/definite-assignment-assertion.ts
 error: A declaration with a definite assignment assertion must also have a type annotation
    |
@@ -240,6 +244,7 @@ error: An import alias cannot use 'import type'
    = help: Drop 'type', or import the type with 'import type x from "m"'.
 
 
+✓ test/parser/misc/ts/import-type-escaped.module.ts
 ✓ test/parser/misc/ts/infer-constraint-function-type.ts
 error: Expected '?' in a conditional type, but found 'extends'
    |
@@ -455,6 +460,17 @@ error: A required element cannot follow an optional element
 
 
 ✓ test/parser/misc/ts/type-assertion-vs-generic-arrow.ts
+✓ test/parser/misc/ts/type-escaped-invalid.module.ts
+error: Keywords cannot contain escape characters
+   |
+ 1 | import { a } from "a";
+ 2 | export \u0074ype { a };
+   |        ^^^^^^^^^
+ 3 | 
+   |
+   = help: Remove the escape characters
+
+
 ✓ test/parser/misc/ts/typed-arrow-predicate-in-ternary-jsx.module.tsx
 ✓ test/parser/misc/ts/typed-arrow-predicate-in-ternary.ts
 ✓ test/parser/misc/ts/unparenthesized-function-type-in-union.ts
