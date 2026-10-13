@@ -81,7 +81,7 @@ On `{ var b; } for (var i = 0;;) {}` it finds `b` and `i`. The walk also returns
 
 ## [Semantic]($section.id('semantic'))
 
-The walk builds the [`Semantic`](/parser/semantic/) model as it goes and returns it. During the walk, `ctx.inTypePosition()` and `ctx.inTsNamespace()` tell where it is, `ctx.parentOf(node)` climbs from any node already entered, and `ctx.symbols.binding(scope, name)` finds a name declared so far. References resolve when the walk ends, so a visitor collects nodes and asks the model after. This one finds the types a file imports.
+The walk builds the [`Semantic`](/parser/semantic/) model as it goes and returns it. During the walk, `ctx.inTypePosition()` and `ctx.inTsNamespace()` tell where it is, and `ctx.symbols.binding(scope, name)` finds a name declared so far. References resolve when the walk ends, so a visitor collects nodes and asks the model after. This one finds the types a file imports.
 
 ```zig
 const sem = traverser.semantic;

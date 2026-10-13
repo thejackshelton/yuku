@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Node } from "yuku-parser";
 import { parse } from "yuku-parser";
 import { walk } from "yuku-ast";
-import { corpusFiles, corpusPresent, projectFiles } from "../corpus";
+import { corpusAndProjectFiles, corpusPresent } from "../corpus";
 
 // walkers visit by key, so template quasis and expressions leave source order
 const INTERLEAVED_TYPES = new Set(["TemplateLiteral", "TSTemplateLiteralType"]);
@@ -39,7 +39,7 @@ describe("walk order", () => {
   test.skipIf(!corpusPresent())("holds across the corpus and projects", async () => {
     const violations: string[] = [];
     let checked = 0;
-    for (const file of [...corpusFiles(), ...projectFiles()]) {
+    for (const file of corpusAndProjectFiles()) {
       const source = await Bun.file(file.path).text();
       const { program, diagnostics } = parse(source, {
         sourceType: file.sourceType,

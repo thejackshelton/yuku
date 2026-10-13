@@ -1,13 +1,12 @@
-import { fileOptions, load } from "yuku-core";
 import { decode } from "./decode.js";
+import { run } from "./wasm.js";
 
-export { langFromPath, sourceTypeFromPath } from "yuku-core";
+export { langFromPath, ready, sourceTypeFromPath } from "./wasm.js";
 export { TokenKind } from "./decode.js";
 
-const _dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 export function parse(source, options = {}) {
-  const text = typeof source === "string" ? source : _dec.decode(source);
-  const core = options.core ?? load();
-  return decode(core.parse(text, fileOptions(options)), text, options.path ?? null);
+  const text = typeof source === "string" ? source : utf8.decode(source);
+  return decode(run("parse", text, options), text, options.path ?? null);
 }

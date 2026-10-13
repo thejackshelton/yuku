@@ -9,7 +9,6 @@ const variables = @import("variables.zig");
 const grammar = @import("../grammar.zig");
 const statements = @import("statements.zig");
 const ecmascript = @import("../ecmascript.zig");
-const extension = @import("../extension.zig");
 
 /// Parses `for`, `for-in`, `for-of`, and `for await` statements.
 /// https://tc39.es/ecma262/#sec-for-statement
@@ -48,14 +47,9 @@ fn parseForHead(parser: *Parser, start: u32, is_for_await: bool) Error!?ast.Node
 
     switch (parser.current_token.tag) {
         .@"const", .@"var" => {
-            const kind: ast.VariableKind = switch (parser.current_token.tag) {
-                .@"const" => .@"const",
-                .@"var" => .@"var",
-                else => unreachable,
-            };
-
+            const kind: ast.VariableKind =
+                if (parser.current_token.tag == .@"const") .@"const" else .@"var";
             try parser.advance() orelse return null;
-
             return parseForWithDeclaration(parser, start, is_for_await, kind, decl_start);
         },
         .let => {
@@ -64,7 +58,6 @@ fn parseForHead(parser: *Parser, start: u32, is_for_await: bool) Error!?ast.Node
             }
 
             try parser.advance() orelse return null;
-
             return parseForWithDeclaration(parser, start, is_for_await, .let, decl_start);
         },
         .using => {
@@ -104,7 +97,6 @@ fn parseForHead(parser: *Parser, start: u32, is_for_await: bool) Error!?ast.Node
 
             try parser.advance() orelse return null; // consume 'await'
             try parser.advance() orelse return null; // consume 'using'
-
             return parseForWithDeclaration(parser, start, is_for_await, .await_using, decl_start);
         },
         else => return parseForWithExpression(parser, start, is_for_await),
@@ -125,24 +117,18 @@ fn parseForWithDeclaration(
     const checkpoint = parser.scratch_a.begin();
     defer parser.scratch_a.reset(checkpoint);
 
-    const first = try variables.parseVariableDeclarator(parser, kind, .for_loop) orelse
-        return null;
-    try parser.scratch_a.append(parser.allocator(), first);
-
-    var end = parser.tree.span(first).end;
-
-    while (parser.current_token.tag == .comma) {
-        try parser.advance() orelse return null;
-
+    var end: u32 = undefined;
+    while (true) {
         const declarator = try variables.parseVariableDeclarator(parser, kind, .for_loop) orelse
             return null;
         try parser.scratch_a.append(parser.allocator(), declarator);
-
         end = parser.tree.span(declarator).end;
+
+        if (parser.current_token.tag != .comma) break;
+        try parser.advance() orelse return null;
     }
 
     const declarators = try parser.flushToExtras(&parser.scratch_a, checkpoint);
-
     parser.context.in = saved_allow_in;
 
     const decl = try parser.tree.addNode(.{
@@ -182,19 +168,17 @@ fn parseForWithExpression(parser: *Parser, start: u32, is_for_await: bool) Error
     const head = parser.current_token;
     const head_is_let = head.tag == .let and !head.isEscaped();
 
-    const saved_allow_in = parser.context.in;
-    parser.context.in = false;
+    const expr = blk: {
+        const saved_allow_in = parser.context.in;
+        parser.context.in = false;
+        defer parser.context.in = saved_allow_in;
 
-    const expr = try expressions.parseExpression(
-        parser,
-        Precedence.Lowest,
-        .{ .respect_allow_in = true },
-    ) orelse {
-        parser.context.in = saved_allow_in;
-        return null;
+        break :blk try expressions.parseExpression(
+            parser,
+            Precedence.Lowest,
+            .{ .respect_allow_in = true },
+        ) orelse return null;
     };
-
-    parser.context.in = saved_allow_in;
 
     if ((parser.current_token.tag == .in or parser.current_token.tag == .of) and
         parser.tree.data(expr) == .assignment_expression)
@@ -208,7 +192,6 @@ fn parseForWithExpression(parser: *Parser, start: u32, is_for_await: bool) Error
 
     if (parser.current_token.tag == .in) {
         try grammar.expressionToPattern(parser, expr, .assignable);
-
         return parseForInStatementRest(parser, start, expr, is_for_await);
     }
 
@@ -234,7 +217,6 @@ fn parseForWithExpression(parser: *Parser, start: u32, is_for_await: bool) Error
         }
 
         try grammar.expressionToPattern(parser, expr, .assignable);
-
         return parseForOfStatementRest(parser, start, expr, is_for_await);
     }
 
@@ -278,10 +260,7 @@ fn parseForStatementRest(
         return null;
     }
 
-    const body = try statements.parseStatement(
-        parser,
-        .{ .can_be_single_statement_context = true },
-    ) orelse return null;
+    const body = try statements.parseSingleStatement(parser) orelse return null;
 
     return try parser.tree.addNode(.{
         .for_statement = .{
@@ -315,10 +294,7 @@ fn parseForInStatementRest(
         return null;
     }
 
-    const body = try statements.parseStatement(
-        parser,
-        .{ .can_be_single_statement_context = true },
-    ) orelse return null;
+    const body = try statements.parseSingleStatement(parser) orelse return null;
 
     return try parser.tree.addNode(.{
         .for_in_statement = .{
@@ -339,24 +315,11 @@ fn parseForOfStatementRest(
 
     const right = try expressions.parseExpression(parser, Precedence.Assignment, .{}) orelse
         return null;
-    if (parser.current_token.tag != .right_paren) {
-        const head: extension.ForOfTail = .{
-            .start = start,
-            .left = left,
-            .right = right,
-            .is_await = is_for_await,
-        };
-        if (try extension.at(.for_of_tail, .{ parser, head })) |outcome| return outcome.node;
-    }
-
     if (!try parser.expect(.right_paren, "Expected ')' after for-of expression", null)) {
         return null;
     }
 
-    const body = try statements.parseStatement(
-        parser,
-        .{ .can_be_single_statement_context = true },
-    ) orelse return null;
+    const body = try statements.parseSingleStatement(parser) orelse return null;
 
     return try parser.tree.addNode(.{
         .for_of_statement = .{

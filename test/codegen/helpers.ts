@@ -7,17 +7,18 @@ export function gen(
   path = "input.ts",
   parseOptions: Partial<ParseOptions> = {},
 ): string {
-  const ast = parse(source, {
-    path,
-    attachComments: true,
-    ...parseOptions,
-  });
-  return generate(ast.program, options).code;
+  const { program } = parse(source, { path, attachComments: true, ...parseOptions });
+  return generate(program, options).code;
+}
+
+interface Snippet {
+  source: string;
+  lang: SourceLang;
 }
 
 const CHAIN_LINKS = 2_000;
 
-export function deepChains(): { source: string; lang: SourceLang }[] {
+export function deepChains(): Snippet[] {
   const links: [string, SourceLang][] = [
     [" + b", "js"],
     [" || b", "js"],
@@ -213,8 +214,8 @@ const COMMENT_SNIPPETS: Record<"js" | "jsx" | "ts" | "tsx", string[]> = {
   tsx: ["<div<T> a='1' />;", "x = <T,>(a: T) => a;"],
 };
 
-export function commentPlacements(): { source: string; lang: SourceLang }[] {
-  const placements: { source: string; lang: SourceLang }[] = [];
+export function commentPlacements(): Snippet[] {
+  const placements: Snippet[] = [];
   for (const [lang, snippets] of Object.entries(COMMENT_SNIPPETS) as [SourceLang, string[]][]) {
     for (const snippet of snippets) {
       const base = parse(snippet, { lang, sourceType: "module", tokens: true });
@@ -226,7 +227,7 @@ export function commentPlacements(): { source: string; lang: SourceLang }[] {
         for (const comment of [" /*c*/ ", " //c\n"]) {
           const source = snippet.slice(0, at) + comment + snippet.slice(at);
           const parsed = parse(source, { lang, sourceType: "module" });
-          // a comment inside jsx text is text
+          // a comment inside JSX text is text
           if (parsed.diagnostics.length > 0 || parsed.comments.length !== 1) continue;
           placements.push({ source, lang });
         }

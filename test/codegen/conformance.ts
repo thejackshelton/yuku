@@ -5,9 +5,9 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parse, sourceTypeFromPath, type ParseOptions } from "yuku-parser";
+import { parse, sourceTypeFromPath, type SourceLang } from "yuku-parser";
 import { generate, type GenerateOptions } from "yuku-codegen";
-import { corpusFiles, projectFiles, type CorpusFile } from "../corpus";
+import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
 import { commentPlacements, deepChains, INSTANTIATIONS } from "./helpers";
 
 const REFERENCE = join(
@@ -24,67 +24,43 @@ export interface Plan {
   map: boolean;
 }
 
+function definePlan(name: string, zig: string[], js: GenerateOptions): Plan {
+  return {
+    name,
+    zig,
+    js,
+    preserveParens: !zig.includes("--no-preserve-parens"),
+    map: zig.includes("--source-map"),
+  };
+}
+
 export const PLANS: Plan[] = [
-  { name: "default", zig: [], js: {}, preserveParens: true, map: false },
-  {
-    name: "all",
-    zig: ["--comments=all"],
-    js: { comments: "all" },
-    preserveParens: true,
-    map: false,
-  },
-  {
-    name: "compact",
-    zig: ["--compact", "--comments=all"],
-    js: { format: "compact", comments: "all" },
-    preserveParens: true,
-    map: false,
-  },
-  {
-    name: "strip",
-    zig: ["--strip", "--comments=all"],
-    js: { strip: true, comments: "all" },
-    preserveParens: true,
-    map: false,
-  },
-  {
-    name: "minify",
-    zig: ["--minify", "--compact", "--quotes=shortest", "--comments=all"],
-    js: { minify: true, comments: "all" },
-    preserveParens: true,
-    map: false,
-  },
-  {
-    name: "map",
-    zig: ["--source-map", "--comments=all"],
-    js: { comments: "all" },
-    preserveParens: true,
-    map: true,
-  },
-  {
-    name: "noparens",
-    zig: ["--no-preserve-parens", "--comments=all", "--quotes=double"],
-    js: { comments: "all", quotes: "double" },
-    preserveParens: false,
-    map: false,
-  },
-  {
-    name: "line",
-    zig: ["--comments=line", "--indent=4", "--quotes=single"],
-    js: { comments: "line", indent: 4, quotes: "single" },
-    preserveParens: true,
-    map: false,
-  },
-  {
-    name: "block",
-    zig: ["--compact", "--comments=block", "--quotes=double"],
-    js: { format: "compact", comments: "block", quotes: "double" },
-    preserveParens: true,
-    map: false,
-  },
-  {
-    name: "everything",
-    zig: [
+  definePlan("default", [], {}),
+  definePlan("all", ["--comments=all"], { comments: "all" }),
+  definePlan("compact", ["--compact", "--comments=all"], { format: "compact", comments: "all" }),
+  definePlan("strip", ["--strip", "--comments=all"], { strip: true, comments: "all" }),
+  definePlan("minify", ["--minify", "--compact", "--quotes=shortest", "--comments=all"], {
+    minify: true,
+    comments: "all",
+  }),
+  definePlan("map", ["--source-map", "--comments=all"], { comments: "all" }),
+  definePlan("noparens", ["--no-preserve-parens", "--comments=all", "--quotes=double"], {
+    comments: "all",
+    quotes: "double",
+  }),
+  definePlan("line", ["--comments=line", "--indent=4", "--quotes=single"], {
+    comments: "line",
+    indent: 4,
+    quotes: "single",
+  }),
+  definePlan("block", ["--compact", "--comments=block", "--quotes=double"], {
+    format: "compact",
+    comments: "block",
+    quotes: "double",
+  }),
+  definePlan(
+    "everything",
+    [
       "--strip",
       "--minify",
       "--compact",
@@ -94,7 +70,7 @@ export const PLANS: Plan[] = [
       "--comments=some",
       "--indent=4",
     ],
-    js: {
+    {
       strip: true,
       minify: { syntax: true },
       format: "compact",
@@ -102,9 +78,7 @@ export const PLANS: Plan[] = [
       comments: "some",
       indent: 4,
     },
-    preserveParens: false,
-    map: true,
-  },
+  ),
 ];
 
 export interface Mismatch {
@@ -132,22 +106,16 @@ export interface Input extends CorpusFile {
 }
 
 export function conformanceInputs(): Input[] {
-  const chains = deepChains().map(({ source, lang }, i) => {
-    const path = `chain-${i}.${lang}`;
+  const input = (name: string, lang: SourceLang, source: string): Input => {
+    const path = `${name}.${lang}`;
     return { path, relative: path, lang, sourceType: sourceTypeFromPath(path), source };
-  });
-  const instantiations: Input = {
-    path: "instantiations.ts",
-    relative: "instantiations.ts",
-    lang: "ts",
-    sourceType: "module",
-    source: INSTANTIATIONS.join("\n"),
   };
-  const comments = commentPlacements().map(({ source, lang }, i) => {
-    const path = `comment-${i}.${lang}`;
-    return { path, relative: path, lang, sourceType: "module" as const, source };
-  });
-  return [...corpusFiles(), ...projectFiles(), ...chains, instantiations, ...comments];
+  return [
+    ...corpusAndProjectFiles(),
+    ...deepChains().map(({ source, lang }, i) => input(`chain-${i}`, lang, source)),
+    input("instantiations", "ts", INSTANTIATIONS.join("\n")),
+    ...commentPlacements().map(({ source, lang }, i) => input(`comment-${i}`, lang, source)),
+  ];
 }
 
 export function runPlan(plan: Plan, files: Input[]): PlanResult {
@@ -158,21 +126,17 @@ export function runPlan(plan: Plan, files: Input[]): PlanResult {
     const file = files[i]!;
     const reference = references[i]!;
     const source = file.source ?? readFileSync(file.path, "utf8");
-    const parseOptions: ParseOptions = {
+    const mismatch = (what: Mismatch["what"], expected: string, actual: string) =>
+      mismatches.push({ path: file.path, what, expected, actual });
+    const parsed = parse(source, {
       lang: file.lang,
       sourceType: file.sourceType,
       attachComments: true,
       preserveParens: plan.preserveParens,
-    };
-    const parsed = parse(source, parseOptions);
+    });
     const skipped = parsed.diagnostics.length > 0;
     if (skipped !== !reference.printed) {
-      mismatches.push({
-        path: file.path,
-        what: "skip",
-        expected: reference.printed ? "printed" : "skipped",
-        actual: skipped ? "skipped" : "printed",
-      });
+      mismatch("skip", reference.printed ? "printed" : "skipped", skipped ? "skipped" : "printed");
       continue;
     }
     if (skipped) continue;
@@ -183,37 +147,20 @@ export function runPlan(plan: Plan, files: Input[]): PlanResult {
     try {
       result = generate(parsed.program, options);
     } catch (error) {
-      mismatches.push({
-        path: file.path,
-        what: "threw",
-        expected: "",
-        actual: String((error as Error).stack ?? error),
-      });
+      mismatch("threw", "", String((error as Error).stack ?? error));
       continue;
     }
     if (result.code !== reference.code) {
-      mismatches.push({
-        path: file.path,
-        what: "code",
-        expected: reference.code,
-        actual: result.code,
-      });
+      mismatch("code", reference.code, result.code);
       continue;
     }
     if (plan.map && result.map?.mappings !== reference.mappings) {
-      mismatches.push({
-        path: file.path,
-        what: "map",
-        expected: reference.mappings,
-        actual: result.map?.mappings ?? "",
-      });
+      mismatch("map", reference.mappings, result.map?.mappings ?? "");
       continue;
     }
     const expected = referenceDiagnostics(reference, source);
     const actual = result.diagnostics.map((d) => `${d.start}-${d.end} ${d.message}`).join("\n");
-    if (actual !== expected) {
-      mismatches.push({ path: file.path, what: "diagnostics", expected, actual });
-    }
+    if (actual !== expected) mismatch("diagnostics", expected, actual);
   }
   return { plan: plan.name, compared, mismatches };
 }

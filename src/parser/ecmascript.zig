@@ -104,7 +104,7 @@ pub fn findNonSimpleParameter(tree: *const ast.Tree, params: ast.FormalParameter
             else => return param_idx,
         };
         switch (tree.data(pattern)) {
-            // `this: T` is erased at emit, so the "simple parameter list" rule does not apply to it
+            // `this: T` is erased at emit, so it keeps the list simple
             .binding_identifier, .ts_this_parameter => {},
             else => return pattern,
         }

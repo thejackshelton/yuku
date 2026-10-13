@@ -1,4 +1,4 @@
-//! The freestanding WebAssembly core of `@yuku-core/wasm`, with no host imports.
+//! The WebAssembly module the npm packages run, freestanding, with no host imports.
 //!
 //!   alloc(len)               -> ptr   buffer for the source bytes
 //!   parse(ptr, len, flags)   -> ptr   length-prefixed AST buffer `[u32 N][N bytes]`, or 0
@@ -11,7 +11,7 @@ const transfer = @import("transfer/root.zig");
 
 const gpa = std.heap.wasm_allocator;
 
-// packed by `@yuku-core/wasm`
+// packed by `yuku-parser`
 const flag = struct {
     const source_type_mask = 0b11;
     const lang_shift = 2;
@@ -19,6 +19,7 @@ const flag = struct {
     const semantic_errors = 1 << 6;
     const attach_comments = 1 << 7;
     const tokens = 1 << 8;
+    const dialect = 1 << 9;
 };
 
 export fn alloc(len: usize) [*]u8 {
@@ -43,7 +44,7 @@ fn parseBuffer(source: []const u8, flags: u32) ![]u8 {
     var tree = try parseTree(source, flags);
     defer tree.deinit();
 
-    if (flags & flag.semantic_errors != 0) _ = parser.semantic.analyze(&tree) catch {};
+    if (flags & flag.semantic_errors != 0) try parser.semantic.check(&tree);
 
     const out = try prefixed(transfer.bufferSize(&tree));
     _ = transfer.serializeInto(&tree, out[4..]);
@@ -70,6 +71,7 @@ fn parseTree(source: []const u8, flags: u32) !parser.ast.Tree {
         .preserve_parens = flags & flag.preserve_parens != 0,
         .comments = if (flags & flag.attach_comments != 0) .both else .flat,
         .tokens = flags & flag.tokens != 0,
+        .dialect = flags & flag.dialect != 0,
     });
 }
 

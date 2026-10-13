@@ -18,20 +18,14 @@ if (floor === undefined) {
   process.exit(1);
 }
 
-// the WebAssembly build uses WebAssembly SIMD and reference types, which raise its own floor
-const exceptions: Record<string, string> = { "@yuku-core/wasm": ">=18.0.0" };
-
 const mismatched: string[] = [];
 
 for (const manifestPath of new Glob("npm/*/package.json").scanSync(root)) {
   const manifest = readJson(join(root, manifestPath));
   if (manifest.main === undefined) continue;
-  const expected = exceptions[manifest.name] ?? floor;
-  const declared = manifest.engines?.node;
-  if (declared !== expected) {
-    mismatched.push(
-      `${manifest.name}: declares ${declared ?? "no engines.node"}, expected ${expected}`,
-    );
+  const declared = manifest.engines?.node ?? "no engines.node";
+  if (declared !== floor) {
+    mismatched.push(`${manifest.name}: declares ${declared}, expected ${floor}`);
   }
 }
 

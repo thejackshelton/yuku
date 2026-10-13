@@ -15,14 +15,14 @@ const object = @import("object.zig");
 const literals = @import("literals.zig");
 const functions = @import("functions.zig");
 const class = @import("class.zig");
-const extensions = @import("extensions.zig");
+const decorator = @import("decorators.zig");
 const parenthesized = @import("parenthesized.zig");
 const modules = @import("modules.zig");
 const grammar = @import("../grammar.zig");
-const extension = @import("../extension.zig");
+const dialect = @import("../dialect.zig");
 const ts = @import("ts/types.zig");
 
-const ParseExpressionOpts = struct {
+const ParseExpressionOptions = struct {
     // set only by the for-head and by positions that inherit [?In], nested calls reset `in`
     respect_allow_in: bool = false,
 };
@@ -30,26 +30,27 @@ const ParseExpressionOpts = struct {
 pub fn parseExpression(
     parser: *Parser,
     min_precedence: u8,
-    opts: ParseExpressionOpts,
+    options: ParseExpressionOptions,
 ) Error!?ast.NodeIndex {
     var left = try parsePrefix(parser, min_precedence) orelse return null;
     const is_ts = parser.tree.isTs();
 
     while (true) {
-        const current_token = parser.current_token;
-
-        if (comptime extension.bound(.jsx_starts_statement)) {
-            if (current_token.tag == .less_than and current_token.hasLineTerminatorBefore() and
-                parser.tree.isJsx())
-            {
-                if (extension.at(.jsx_starts_statement, .{parser}) orelse false) break;
+        if (comptime dialect.has(.operator)) {
+            switch (try dialect.claim(.operator, parser, .{ left, min_precedence })) {
+                .decline => {},
+                .node => |node| {
+                    left = node;
+                    continue;
+                },
+                .failed => return null,
+                .end => break,
             }
         }
 
-        // f<T>(x)
-        //  ^ dispatched before the binary precedence gate so it can
-        //    act as a call-level postfix (generic call/instantiation)
-        //    instead of the relational `f < T`
+        const current_token = parser.current_token;
+
+        // `f<T>(x)` binds as a call before the precedence gate can read a relational `f < T`
         if (is_ts and ts.isAngleOpen(current_token.tag) and
             maxLeftPrecedence(parser.tree.data(left)) >= Precedence.Call)
         {
@@ -63,12 +64,10 @@ pub fn parseExpression(
 
         if (infix_precedence < min_precedence or infix_precedence == 0) break;
 
-        //  a++()        <- can't call an update expression
-        //  () => {}()   <- can't call an arrow function
-        // breaking here produces natural "expected semicolon" error
+        // `a++()` and `() => {}()` stop here and surface as a missing semicolon
         if (infix_precedence > maxLeftPrecedence(parser.tree.data(left))) break;
 
-        if (opts.respect_allow_in and current_token.tag == .in and !parser.context.in) break;
+        if (options.respect_allow_in and current_token.tag == .in and !parser.context.in) break;
 
         left = try parseInfix(parser, infix_precedence, left) orelse return null;
     }
@@ -76,12 +75,7 @@ pub fn parseExpression(
     return left;
 }
 
-/// Returns the infix precedence of `token`, or 0 when a line break before it ends the
-/// expression under a `[no LineTerminator here]` restriction.
-///
-/// - `a [no LineTerminator here] ++` / `--` (postfix update).
-/// - `a [no LineTerminator here] as T` / `satisfies T` (TypeScript narrowing).
-/// - `a [no LineTerminator here] !` (TypeScript non-null assertion, prefix only in JavaScript).
+// a line break before postfix `++` `--`, `as`, `satisfies`, or non-null `!` ends the expression
 inline fn infixPrecedence(token: Token, is_ts: bool) u8 {
     switch (token.tag) {
         .increment, .decrement, .as, .satisfies => {
@@ -97,7 +91,10 @@ inline fn infixPrecedence(token: Token, is_ts: bool) u8 {
 }
 
 fn parsePrefix(parser: *Parser, precedence: u8) Error!?ast.NodeIndex {
-    if (try extension.at(.expression_prefix, .{parser})) |outcome| return outcome.node;
+    if (comptime dialect.has(.expression)) {
+        if (try dialect.at(.expression, parser, .{})) |expression| return expression;
+    }
+
     const tag = parser.current_token.tag;
 
     if (tag == .identifier) {
@@ -114,7 +111,7 @@ fn parsePrefix(parser: *Parser, precedence: u8) Error!?ast.NodeIndex {
     }
 
     if (tag == .left_paren) {
-        return parseParenthesizedOrArrowFunction(parser, null, precedence);
+        return parseParenthesizedOrArrowFunction(parser, precedence);
     }
 
     if (tag == .await and parser.context.await) {
@@ -132,7 +129,7 @@ fn parsePrefix(parser: *Parser, precedence: u8) Error!?ast.NodeIndex {
     }
 
     if (tag == .import) {
-        return parseImportExpression(parser, null);
+        return parseImportExpression(parser);
     }
 
     if (tag == .async) {
@@ -157,7 +154,7 @@ fn parseInfix(parser: *Parser, precedence: u8, left: ast.NodeIndex) Error!?ast.N
     const current = parser.current_token;
     const tag = current.tag;
 
-    if (tag == .dot) return parseStaticMemberExpression(parser, left, false);
+    if (tag == .dot) return parseStaticMemberExpression(parser, left);
     if (tag == .left_paren) return parseCallExpression(parser, left, false, .null);
     if (tag == .left_bracket) return parseComputedMemberExpression(parser, left, false);
 
@@ -168,8 +165,9 @@ fn parseInfix(parser: *Parser, precedence: u8, left: ast.NodeIndex) Error!?ast.N
     if (parser.tree.isTs()) {
         switch (tag) {
             .as, .satisfies => return ts.parseAsOrSatisfiesExpression(parser, left),
-            .logical_not => if (!current.hasLineTerminatorBefore())
-                return ts.parseNonNullExpression(parser, left),
+            .logical_not => if (!current.hasLineTerminatorBefore()) {
+                return ts.parseNonNullExpression(parser, left);
+            },
             else => {},
         }
     }
@@ -244,9 +242,8 @@ pub inline fn parsePrimaryExpression(parser: *Parser, precedence: u8) Error!?ast
         .function => functions.parseFunction(parser, .{ .is_expression = true }, null),
         .class => class.parseClass(parser, .{ .is_expression = true }, null),
         .at => blk: {
-            if (try extension.at(.at_expression, .{parser})) |outcome| return outcome.node;
             const decorators_start = parser.current_token.span.start;
-            const decorators = try extensions.parseDecorators(parser) orelse break :blk null;
+            const decorators = try decorator.parseDecorators(parser) orelse break :blk null;
             break :blk try class.parseClassDecorated(
                 parser,
                 .{ .is_expression = true },
@@ -260,13 +257,11 @@ pub inline fn parsePrimaryExpression(parser: *Parser, precedence: u8) Error!?ast
             }
 
             const token = parser.current_token;
-
             try parser.report(
                 token.span,
                 try parser.fmt("Unexpected token '{s}'", .{parser.describeToken(token)}),
                 .{ .help = "Expected an expression" },
             );
-
             return null;
         },
     };
@@ -275,16 +270,11 @@ pub inline fn parsePrimaryExpression(parser: *Parser, precedence: u8) Error!?ast
 // used by `new` and parseLeftHandSideExpression, neither of which takes an arrow
 fn parseParenthesizedExpression(parser: *Parser) Error!?ast.NodeIndex {
     const cover = try parenthesized.parseCover(parser) orelse return null;
-
     return parenthesized.coverToParenthesizedExpression(parser, cover);
 }
 
-fn parseParenthesizedOrArrowFunction(
-    parser: *Parser,
-    arrow_start: ?u32,
-    precedence: u8,
-) Error!?ast.NodeIndex {
-    const start = arrow_start orelse parser.current_token.span.start;
+fn parseParenthesizedOrArrowFunction(parser: *Parser, precedence: u8) Error!?ast.NodeIndex {
+    const start = parser.current_token.span.start;
 
     if (parser.tree.isTs() and precedence <= Precedence.Assignment) {
         switch (ts.classifyArrowHead(parser)) {
@@ -298,7 +288,7 @@ fn parseParenthesizedOrArrowFunction(
 
     // ts arrows all went through the tristate above, a stray `:` belongs to the outer context
     if (isArrowNext(parser, precedence)) {
-        return parenthesized.coverToArrowFunction(parser, cover, false, start);
+        return parenthesized.coverToArrowFunction(parser, cover, start);
     }
 
     return parenthesized.coverToParenthesizedExpression(parser, cover);
@@ -533,14 +523,11 @@ fn parseSuperExpression(parser: *Parser) Error!?ast.NodeIndex {
 }
 
 /// Parses `import.meta` or `import(...)`.
-pub fn parseImportExpression(
-    parser: *Parser,
-    name_from_param: ?ast.NodeIndex,
-) Error!?ast.NodeIndex {
+pub fn parseImportExpression(parser: *Parser) Error!?ast.NodeIndex {
     // `import` is a keyword here but stored as an IdentifierName, so reject escapes
     try parser.reportIfEscapedKeyword(parser.current_token);
 
-    const name = name_from_param orelse try literals.parseIdentifierName(parser) orelse return null;
+    const name = try literals.parseIdentifierName(parser) orelse return null;
 
     return switch (parser.current_token.tag) {
         .dot => parseImportMetaOrPhaseImport(parser, name),
@@ -559,8 +546,6 @@ pub fn parseImportExpression(
 
 fn parseImportMetaOrPhaseImport(parser: *Parser, name: ast.NodeIndex) Error!?ast.NodeIndex {
     try parser.advance() orelse return null; // consume '.'
-
-    const name_span = parser.tree.span(name);
 
     if (parser.current_token.tag == .source) {
         try parser.advance() orelse return null; // consume 'source'
@@ -589,7 +574,7 @@ fn parseImportMetaOrPhaseImport(parser: *Parser, name: ast.NodeIndex) Error!?ast
 
     return try parser.tree.addNode(
         .{ .meta_property = .{ .meta = name, .property = property } },
-        .{ .start = name_span.start, .end = parser.tree.span(property).end },
+        .{ .start = parser.tree.span(name).start, .end = parser.tree.span(property).end },
     );
 }
 
@@ -638,19 +623,18 @@ fn parseNewExpression(parser: *Parser) Error!?ast.NodeIndex {
     var type_arguments: ast.NodeIndex = .null;
 
     while (true) {
-        // new C<T>(x)
-        //      ^~^ committed type arguments bind to the constructor,
-        //          unless a template follows
-        //
-        // new C<T>`x`
-        //      ^~^ tags the template instead, giving
-        //          NewExpression(TaggedTemplateExpression<T>(C))
+        // committed type arguments end the callee and fold into the NewExpression
+        //   new C<T>(x)
+        //   new C<T>`x`    NewExpression(TaggedTemplateExpression<T>(C))
         if (type_arguments != .null and
             parser.current_token.tag != .template_head and
-            parser.current_token.tag != .no_substitution_template) break;
+            parser.current_token.tag != .no_substitution_template)
+        {
+            break;
+        }
 
         callee = switch (parser.current_token.tag) {
-            .dot => try parseStaticMemberExpression(parser, callee, false) orelse return null,
+            .dot => try parseStaticMemberExpression(parser, callee) orelse return null,
             .left_bracket => try parseComputedMemberExpression(parser, callee, false) orelse
                 return null,
             .template_head, .no_substitution_template => blk: {
@@ -662,10 +646,7 @@ fn parseNewExpression(parser: *Parser) Error!?ast.NodeIndex {
                 type_arguments = .null;
                 break :blk tagged;
             },
-            // new (a?.b)!()
-            //           ^ binds to the callee, so this constructs with
-            //             arguments as NewExpression(TSNonNull(a?.b), ())
-            //             instead of calling the finished `new` expression
+            // `new (a?.b)!()` is NewExpression(TSNonNull(a?.b), ()), the `!` binds to the callee
             .logical_not => if (parser.tree.isTs() and
                 !parser.current_token.hasLineTerminatorBefore())
                 try ts.parseNonNullExpression(parser, callee) orelse return null
@@ -679,9 +660,6 @@ fn parseNewExpression(parser: *Parser) Error!?ast.NodeIndex {
                 );
                 return null;
             },
-            // new Foo<T>(...)   or   new Foo<T>
-            //        ^~^ on commit, the type args fold straight into
-            //            the `NewExpression` node itself
             .less_than, .left_shift => blk: {
                 if (!parser.tree.isTs()) break;
                 type_arguments = try ts.tryParseTypeArgumentsInExpression(parser);
@@ -722,7 +700,6 @@ fn parseNewExpression(parser: *Parser) Error!?ast.NodeIndex {
             return null;
         }
         try parser.advance() orelse return null; // consume ')'
-
         break :blk arguments_end;
     } else if (type_arguments != .null)
         parser.tree.span(type_arguments).end
@@ -922,18 +899,14 @@ fn parseConditionalExpression(
     @"test": ast.NodeIndex,
 ) Error!?ast.NodeIndex {
     const test_span = parser.tree.span(@"test");
-
     try parser.advance() orelse return null; // consume '?'
 
     // the consequent is AssignmentExpression[+In]
     const saved_allow_in = parser.context.in;
     parser.context.in = true;
 
-    // cond ? (a): T => b : alt
-    //           ^ a ts arrow return type can eat the ternary `:`, so
-    //             parse permissively, and only if the `:` went missing
-    //             rewind and re-parse with return types restricted so
-    //             the arrow yields it (see `tryParseArrow`)
+    // an arrow return type can eat the ternary `:` in `c ? (a): T => b : d`,
+    // so a consequent left without its `:` reparses with arrow return types restricted
     const consequent = if (!parser.tree.isTs())
         try parseExpression(parser, precedence, .{}) orelse return null
     else consequent: {
@@ -981,12 +954,13 @@ fn parseConditionalExpression(
 pub fn isSimpleAssignmentTarget(parser: *Parser, index: ast.NodeIndex) bool {
     return switch (parser.tree.data(index)) {
         .identifier_reference, .binding_identifier => true,
-        .member_expression => |m| !m.optional, // optional chaining is not a valid assignment target
-        .parenthesized_expression => |p| isSimpleAssignmentTarget(parser, p.expression),
-        .ts_non_null_expression => |n| isSimpleAssignmentTarget(parser, n.expression),
-        .ts_as_expression => |a| isSimpleAssignmentTarget(parser, a.expression),
-        .ts_satisfies_expression => |s| isSimpleAssignmentTarget(parser, s.expression),
-        .ts_type_assertion => |t| isSimpleAssignmentTarget(parser, t.expression),
+        .member_expression => |member| !member.optional,
+        inline .parenthesized_expression,
+        .ts_non_null_expression,
+        .ts_as_expression,
+        .ts_satisfies_expression,
+        .ts_type_assertion,
+        => |wrapper| isSimpleAssignmentTarget(parser, wrapper.expression),
         else => false,
     };
 }
@@ -1003,14 +977,10 @@ pub fn parseObjectExpression(parser: *Parser) Error!?ast.NodeIndex {
     return try object.coverToExpression(parser, cover);
 }
 
-fn parseStaticMemberExpression(
-    parser: *Parser,
-    object_node: ast.NodeIndex,
-    optional: bool,
-) Error!?ast.NodeIndex {
+fn parseStaticMemberExpression(parser: *Parser, object_node: ast.NodeIndex) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .dot);
     try parser.advance() orelse return null; // consume '.'
-    return parseMemberProperty(parser, object_node, optional);
+    return parseMemberProperty(parser, object_node, false);
 }
 
 fn parseMemberProperty(
@@ -1052,13 +1022,12 @@ fn parseComputedMemberExpression(
     const open_bracket_span = parser.current_token.span;
     try parser.advance() orelse return null; // consume '['
 
-    const saved_allow_in = parser.context.in;
-    parser.context.in = true;
-    const property = try parseExpression(parser, Precedence.Lowest, .{}) orelse {
-        parser.context.in = saved_allow_in;
-        return null;
+    const property = blk: {
+        const saved_allow_in = parser.context.in;
+        parser.context.in = true;
+        defer parser.context.in = saved_allow_in;
+        break :blk try parseExpression(parser, Precedence.Lowest, .{}) orelse return null;
     };
-    parser.context.in = saved_allow_in;
 
     const end = parser.current_token.span.end;
     if (parser.current_token.tag != .right_bracket) {
@@ -1096,7 +1065,7 @@ pub fn parseCallExpression(
     const open_paren_span = parser.current_token.span;
     try parser.advance() orelse return null; // consume '('
 
-    const args = try parseArguments(parser) orelse return null;
+    const arguments = try parseArguments(parser) orelse return null;
 
     const end = parser.current_token.span.end;
     if (parser.current_token.tag != .right_paren) {
@@ -1116,7 +1085,7 @@ pub fn parseCallExpression(
     return try parser.tree.addNode(.{
         .call_expression = .{
             .callee = callee_node,
-            .arguments = args,
+            .arguments = arguments,
             .optional = optional,
             .type_arguments = type_arguments,
         },
@@ -1129,39 +1098,19 @@ fn parseArguments(parser: *Parser) Error!?ast.IndexRange {
 
     const saved_allow_in = parser.context.in;
     parser.context.in = true;
+    defer parser.context.in = saved_allow_in;
 
     while (parser.current_token.tag != .right_paren and parser.current_token.tag != .eof) {
-        const arg = if (parser.current_token.tag == .spread) blk: {
-            const spread_start = parser.current_token.span.start;
+        const argument = if (parser.current_token.tag == .spread)
+            try parseSpreadElement(parser) orelse return null
+        else
+            try parseExpression(parser, Precedence.Assignment, .{}) orelse return null;
+        try parser.scratch_a.append(parser.allocator(), argument);
 
-            try parser.advance() orelse return null; // consume '...'
-
-            const argument = try parseExpression(parser, Precedence.Assignment, .{}) orelse {
-                parser.context.in = saved_allow_in;
-                return null;
-            };
-
-            const arg_span = parser.tree.span(argument);
-
-            break :blk try parser.tree.addNode(.{
-                .spread_element = .{ .argument = argument },
-            }, .{ .start = spread_start, .end = arg_span.end });
-        } else try parseExpression(parser, Precedence.Assignment, .{}) orelse {
-            parser.context.in = saved_allow_in;
-
-            return null;
-        };
-
-        try parser.scratch_a.append(parser.allocator(), arg);
-
-        if (parser.current_token.tag == .comma) {
-            try parser.advance() orelse return null;
-        } else {
-            break;
-        }
+        if (parser.current_token.tag != .comma) break;
+        try parser.advance() orelse return null;
     }
 
-    parser.context.in = saved_allow_in;
     return try parser.flushToExtras(&parser.scratch_a, checkpoint);
 }
 
@@ -1206,39 +1155,27 @@ fn parseOptionalChain(parser: *Parser, left: ast.NodeIndex) Error!?ast.NodeIndex
     const chain_start = parser.tree.span(left).start;
     try parser.advance() orelse return null; // consume '?.'
 
-    var expr = try parseOptionalChainElement(parser, left, true) orelse return null;
+    var expr = try parseOptionalChainElement(parser, left) orelse return null;
 
     while (true) {
         switch (parser.current_token.tag) {
-            .dot => expr = try parseStaticMemberExpression(parser, expr, false) orelse return null,
+            .dot => expr = try parseStaticMemberExpression(parser, expr) orelse return null,
             .left_bracket => expr = try parseComputedMemberExpression(parser, expr, false) orelse
                 return null,
             .left_paren => expr = try parseCallExpression(parser, expr, false, .null) orelse
                 return null,
             .optional_chaining => {
                 try parser.advance() orelse return null;
-                expr = try parseOptionalChainElement(parser, expr, true) orelse return null;
+                expr = try parseOptionalChainElement(parser, expr) orelse return null;
             },
-            // m?.[0]!
-            //       ^ parsed here, inside the chain, so it lifts
-            //         naturally under the enclosing wrapper as
-            //         ChainExpression(TSNonNullExpression(m?.[0]))
+            // `m?.[0]!` is ChainExpression(TSNonNullExpression(m?.[0]))
             .logical_not => {
                 if (!is_ts or parser.current_token.hasLineTerminatorBefore()) break;
-                const bang_end = parser.current_token.span.end;
-                try parser.advance() orelse return null;
-                expr = try parser.tree.addNode(
-                    .{ .ts_non_null_expression = .{ .expression = expr } },
-                    .{ .start = parser.tree.span(expr).start, .end = bang_end },
-                );
+                expr = try ts.parseNonNullExpression(parser, expr) orelse return null;
             },
-            // a?.b<T>(c)
-            //     ^~^ `(` follows -> generic call, stays in the chain
-            //
-            // a?.b<T>
-            //     ^~^ bare -> rewind past `<T>` and close the chain,
-            //         so the outer pratt loop wraps the result as
-            //         TSInstantiationExpression(ChainExpression(a?.b))
+            // a generic call stays in the chain, bare type arguments close it
+            //   a?.b<T>(c)    ChainExpression(a?.b<T>(c))
+            //   a?.b<T>       TSInstantiationExpression(ChainExpression(a?.b))
             .less_than, .left_shift => {
                 if (!is_ts) break;
                 const checkpoint = parser.checkpoint();
@@ -1271,32 +1208,26 @@ fn parseOptionalChain(parser: *Parser, left: ast.NodeIndex) Error!?ast.NodeIndex
 }
 
 // caller already consumed the `?.`
-fn parseOptionalChainElement(
-    parser: *Parser,
-    object_node: ast.NodeIndex,
-    optional: bool,
-) Error!?ast.NodeIndex {
+fn parseOptionalChainElement(parser: *Parser, object_node: ast.NodeIndex) Error!?ast.NodeIndex {
     const tag = parser.current_token.tag;
 
     if (tag.isIdentifierLike() or tag == .private_identifier) {
-        return parseMemberProperty(parser, object_node, optional);
+        return parseMemberProperty(parser, object_node, true);
     }
 
-    // a?.<T>(args)
-    //    ^~^ generic call right after `?.` is the only valid form here,
-    //        a?.<T>`tpl` and a bare a?.<T> rewind instead
+    // only a generic call follows `?.` directly, `a?.<T>` alone or before a template rewinds
     if (parser.tree.isTs() and ts.isAngleOpen(tag)) {
         const checkpoint = parser.checkpoint();
         const type_arguments = try ts.tryParseTypeArgumentsInExpression(parser);
         if (type_arguments != .null and parser.current_token.tag == .left_paren) {
-            return parseCallExpression(parser, object_node, optional, type_arguments);
+            return parseCallExpression(parser, object_node, true, type_arguments);
         }
         parser.rewind(checkpoint);
     }
 
     return switch (tag) {
-        .left_bracket => parseComputedMemberExpression(parser, object_node, optional),
-        .left_paren => parseCallExpression(parser, object_node, optional, .null),
+        .left_bracket => parseComputedMemberExpression(parser, object_node, true),
+        .left_paren => parseCallExpression(parser, object_node, true, .null),
         .template_head, .no_substitution_template => {
             try parser.report(
                 parser.current_token.span,
@@ -1318,7 +1249,7 @@ fn parseOptionalChainElement(
     };
 }
 
-pub const LhsContext = enum {
+pub const LeftHandSideContext = enum {
     /// `[k]` is a computed member access.
     extends_clause,
     /// `[k]` begins the next class element's key.
@@ -1327,11 +1258,14 @@ pub const LhsContext = enum {
 
 /// Parses a LeftHandSideExpression.
 /// https://tc39.es/ecma262/#prod-LeftHandSideExpression
-pub fn parseLeftHandSideExpression(parser: *Parser, ctx: LhsContext) Error!?ast.NodeIndex {
+pub fn parseLeftHandSideExpression(
+    parser: *Parser,
+    context: LeftHandSideContext,
+) Error!?ast.NodeIndex {
     var expr: ast.NodeIndex = switch (parser.current_token.tag) {
         .left_paren => try parseParenthesizedExpression(parser) orelse return null,
         .new => try parseNewExpression(parser) orelse return null,
-        .import => try parseImportExpression(parser, null) orelse return null,
+        .import => try parseImportExpression(parser) orelse return null,
         else => try parsePrimaryExpression(parser, Precedence.Call) orelse return null,
     };
 
@@ -1339,8 +1273,8 @@ pub fn parseLeftHandSideExpression(parser: *Parser, ctx: LhsContext) Error!?ast.
 
     while (true) {
         expr = switch (parser.current_token.tag) {
-            .dot => try parseStaticMemberExpression(parser, expr, false) orelse return null,
-            .left_bracket => switch (ctx) {
+            .dot => try parseStaticMemberExpression(parser, expr) orelse return null,
+            .left_bracket => switch (context) {
                 .extends_clause => try parseComputedMemberExpression(parser, expr, false) orelse
                     return null,
                 .decorator => break,

@@ -49,21 +49,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build native packages
-        run: bun run build:npm
-
-      - name: Build the WebAssembly core
-        run: bun run build:wasm
-
-      - name: Verify binding artifacts
-        run: bun .github/scripts/check-binding-artifacts.ts
+      - name: Build the npm packages
+        run: bun run build
 
       - name: Publish preview packages
-        run: |
-          bun run pkg-pr-new publish --compact --comment=off \
-            --json preview-packages.json \
-            './npm/*' \
-            './npm/*/@*/binding-*'
+        run: bun run pkg-pr-new publish --compact --comment=off --json preview-packages.json './npm/*'
 
       - name: Comment the preview packages
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository

@@ -1,4 +1,4 @@
-// Compares each project's imports, re-exports, and exported names with one tsc program.
+// each project's imports, re-exports, and exported names against one tsc program
 
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";

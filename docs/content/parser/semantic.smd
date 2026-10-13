@@ -28,7 +28,7 @@ project.module("c.ts").rootScope.find("renamed").definition().binding.name;
 // "value"
 ```
 
-The same model as plain objects, computed natively, with every import linked across a project. See [yuku-analyzer on npm](https://www.npmjs.com/package/yuku-analyzer) for the full API.
+The same model as plain objects, computed in Zig, with every import linked across a project. See [yuku-analyzer on npm](https://www.npmjs.com/package/yuku-analyzer) for the full API.
 
 ## [Zig]($section.id('zig'))
 
@@ -40,6 +40,12 @@ const semantic = try parser.semantic.analyze(&tree);
 ```
 
 `analyze` returns the `Semantic` model and appends its errors to `tree.diagnostics`. The model lives in the tree's arena and describes the tree as parsed, so analyze again after a transform. To run your own hooks during the analysis walk, use the [semantic traverser](/parser/traverse/).
+
+When only the errors matter, `check` reports the same ones without building the model. It tracks just the scopes and bindings they depend on, in about two thirds of the time.
+
+```zig
+try parser.semantic.check(&tree);
+```
 
 ## [The model]($section.id('the-model'))
 

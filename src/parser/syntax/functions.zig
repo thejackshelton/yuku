@@ -2,15 +2,14 @@ const std = @import("std");
 const ast = @import("../ast.zig");
 const Parser = @import("../parser.zig").Parser;
 const Error = @import("../parser.zig").Error;
-const TokenTag = @import("../token.zig").TokenTag;
 
 const literals = @import("literals.zig");
 const patterns = @import("patterns.zig");
-const extensions = @import("extensions.zig");
+const decorator = @import("decorators.zig");
 const ts = @import("ts/types.zig");
-const extension = @import("../extension.zig");
+const dialect = @import("../dialect.zig");
 
-const ParseFunctionOpts = struct {
+const ParseFunctionOptions = struct {
     is_async: bool = false,
     is_expression: bool = false,
     is_declare: bool = false,
@@ -20,7 +19,7 @@ const ParseFunctionOpts = struct {
 
 pub fn parseFunction(
     parser: *Parser,
-    opts: ParseFunctionOpts,
+    options: ParseFunctionOptions,
     start_from_param: ?u32,
 ) Error!?ast.NodeIndex {
     std.debug.assert(start_from_param != null or parser.current_token.tag == .function);
@@ -29,7 +28,7 @@ pub fn parseFunction(
 
     if (!try parser.expect(.function, "Expected 'function' keyword", null)) return null;
 
-    const is_function_expression = opts.is_expression and !opts.is_default_export;
+    const is_function_expression = options.is_expression and !options.is_default_export;
 
     var is_generator = false;
 
@@ -46,22 +45,11 @@ pub fn parseFunction(
         parser.context.await = outer_await_is_keyword;
     }
 
-    // yield rules differ for declarations vs expressions inside a generator body
-    //   function yield(){}        declaration. invalid.
-    //   (function yield(){})      expression. ok.
-    //   (function* yield(){})     invalid.
-    parser.context.yield = if (is_function_expression)
-        is_generator
-    else
-        outer_yield_is_keyword;
-
-    // await rules also differ in script code
-    //   async function await(){}     declaration. valid.
-    //   (async function await(){})   expression. invalid.
-    parser.context.await = if (is_function_expression)
-        opts.is_async
-    else
-        outer_await_is_keyword;
+    // an expression's name follows its own yield and await rules, a declaration's the outer ones
+    //   (function* yield(){})        invalid
+    //   async function await(){}     valid in script code
+    parser.context.yield = if (is_function_expression) is_generator else outer_yield_is_keyword;
+    parser.context.await = if (is_function_expression) options.is_async else outer_await_is_keyword;
 
     const id = if (parser.current_token.tag.isIdentifierLike())
         try literals.parseBindingIdentifier(parser) orelse .null
@@ -70,9 +58,9 @@ pub fn parseFunction(
 
     // `function* yield(){}` is fine but `function* f(yield){}` is not
     parser.context.yield = is_generator;
-    parser.context.await = opts.is_async;
+    parser.context.await = options.is_async;
 
-    if (!opts.is_expression and !opts.is_default_export and id == .null) {
+    if (!options.is_expression and !options.is_default_export and id == .null) {
         try parser.report(
             parser.current_token.span,
             "Function declaration requires a name",
@@ -109,13 +97,11 @@ pub fn parseFunction(
     }
 
     // ambient declarations and overload signatures have no body
-    var has_body = !is_ambient_declaration and
-        (!is_ts or is_function_expression or parser.current_token.tag == .left_brace);
-    if (extension.at(.function_has_body, .{parser})) |answer| has_body = answer;
-    const body: ast.NodeIndex = if (has_body)
-        try parseFunctionBody(parser) orelse .null
+    const presence: BodyPresence = if (!is_ts or is_function_expression) .required else .optional;
+    const body: ast.NodeIndex = if (is_ambient_declaration)
+        .null
     else
-        .null;
+        try parseFunctionBody(parser, presence) orelse .null;
 
     const end = if (body != .null)
         parser.tree.span(body).end
@@ -132,7 +118,7 @@ pub fn parseFunction(
     if (parser.context.single_statement) {
         @branchHint(.unlikely);
 
-        if (opts.is_async) {
+        if (options.is_async) {
             try parser.report(
                 parser.current_token.span,
                 "Async functions can only be declared at the top level or inside a block",
@@ -154,21 +140,42 @@ pub fn parseFunction(
             .type = function_type,
             .id = id,
             .generator = is_generator,
-            .async = opts.is_async,
-            .declare = opts.is_declare,
+            .async = options.is_async,
+            .declare = options.is_declare,
             .params = params,
             .body = body,
             .type_parameters = type_parameters,
             .return_type = return_type,
         },
-    }, .{
-        .start = start,
-        .end = end,
-    });
+    }, .{ .start = start, .end = end });
 }
 
-pub fn parseFunctionBody(parser: *Parser) Error!?ast.NodeIndex {
-    if (try extension.at(.function_body, .{parser})) |outcome| return outcome.node;
+pub const BodyPresence = enum { required, optional };
+
+/// Returns `.null` when an optional body is absent.
+pub inline fn parseFunctionBody(parser: *Parser, presence: BodyPresence) Error!?ast.NodeIndex {
+    if (comptime dialect.has(.function_body)) {
+        if (try parseDialectFunctionBody(parser)) |body| return body;
+    }
+
+    if (presence == .optional and parser.current_token.tag != .left_brace) return .null;
+    return parseBlockFunctionBody(parser);
+}
+
+// a dialect's body reads `return` and a directive prologue, as a block body does
+fn parseDialectFunctionBody(parser: *Parser) Error!??ast.NodeIndex {
+    const saved = parser.context;
+    parser.context.@"return" = true;
+    parser.context.directive_prologue = true;
+    defer {
+        parser.context.@"return" = saved.@"return";
+        parser.context.directive_prologue = saved.directive_prologue;
+    }
+
+    return dialect.at(.function_body, parser, .{});
+}
+
+fn parseBlockFunctionBody(parser: *Parser) Error!?ast.NodeIndex {
     const start = parser.current_token.span.start;
 
     if (!try parser.expect(
@@ -182,9 +189,7 @@ pub fn parseFunctionBody(parser: *Parser) Error!?ast.NodeIndex {
     defer parser.context.@"return" = saved_allow_return_statement;
 
     const body = try parser.parseBody(.right_brace, .function);
-
     const end = parser.current_token.span.end;
-
     if (!try parser.expect(
         .right_brace,
         "Expected '}' to close function body",
@@ -217,7 +222,7 @@ pub fn parseFormalParameters(
         const param_start = parser.current_token.span.start;
 
         const decorators: ast.IndexRange = if (is_ts and parser.current_token.tag == .at)
-            try extensions.parseDecorators(parser) orelse return null
+            try decorator.parseDecorators(parser) orelse return null
         else
             ast.IndexRange.empty;
 
@@ -226,15 +231,15 @@ pub fn parseFormalParameters(
             if (rest != .null) ts.applyDecoratorsToPattern(parser, rest, decorators);
 
             if (parser.current_token.tag == .comma and rest != .null) {
-                const after_comma = parser.peekAhead();
-                if (after_comma.tag == .right_paren) {
+                const span: ast.Span = .{
+                    .start = parser.tree.span(rest).start,
+                    .end = parser.current_token.span.end,
+                };
+                if (parser.peekAhead().tag == .right_paren) {
                     // tsc allows `(...rest,)` in ambient contexts only
                     if (!parser.ts_context.ambient) {
                         try parser.report(
-                            .{
-                                .start = parser.tree.span(rest).start,
-                                .end = parser.current_token.span.end,
-                            },
+                            span,
                             "Rest parameter may not have a trailing comma",
                             .{ .help = "Remove the trailing comma after the rest parameter." },
                         );
@@ -242,10 +247,7 @@ pub fn parseFormalParameters(
                     }
                 } else {
                     try parser.report(
-                        .{
-                            .start = parser.tree.span(rest).start,
-                            .end = parser.current_token.span.end,
-                        },
+                        span,
                         "Rest parameter must be the last parameter",
                         .{ .help = "Move the '...rest' parameter to the end of the parameter" ++
                             " list, or remove trailing parameters." },
@@ -420,21 +422,14 @@ fn parseThisParameter(parser: *Parser) Error!?ast.NodeIndex {
 
 // `constructor(readonly)` names a parameter, not a modifier
 fn isParameterPropertyModifierStart(parser: *Parser) bool {
-    const tag = parser.current_token.tag;
-    if (!isParameterPropertyModifierTag(tag)) return false;
+    switch (parser.current_token.tag) {
+        .public, .private, .protected, .readonly, .override => {},
+        else => return false,
+    }
     const next = parser.peekAhead();
     if (next.hasLineTerminatorBefore()) return false;
-    return canFollowParameterPropertyModifier(next.tag);
-}
-
-inline fn isParameterPropertyModifierTag(tag: TokenTag) bool {
-    return tag == .public or tag == .private or tag == .protected or
-        tag == .readonly or tag == .override;
-}
-
-inline fn canFollowParameterPropertyModifier(tag: TokenTag) bool {
-    return tag.isIdentifierLike() or
-        tag == .left_bracket or
-        tag == .left_brace or
-        tag == .spread;
+    return switch (next.tag) {
+        .left_bracket, .left_brace, .spread => true,
+        else => next.tag.isIdentifierLike(),
+    };
 }

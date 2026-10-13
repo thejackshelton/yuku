@@ -1,5 +1,6 @@
 const std = @import("std");
 const util = @import("util");
+const Simd = util.Simd;
 
 const Allocator = std.mem.Allocator;
 
@@ -35,13 +36,6 @@ pub const Options = struct {
 /// A zero-based source position, with `col` counted in UTF-16 code units.
 pub const LineCol = struct { line: u32, col: u32 };
 
-pub const Segment = struct {
-    gen_line: u32,
-    gen_col: u32,
-    orig_line: u32,
-    orig_col: u32,
-};
-
 pub const State = struct {
     options: Options,
     source: []const u8,
@@ -50,14 +44,15 @@ pub const State = struct {
     gen_line: u32 = 0,
     gen_col: u32 = 0,
 
-    pending: Segment = undefined,
-    has_pending: bool = false,
+    pending: ?Segment = null,
 
     prev_gen_col: i32 = 0,
     prev_orig_line: i32 = 0,
     prev_orig_col: i32 = 0,
     enc_gen_line: i32 = 0,
     first_in_line: bool = true,
+
+    const Segment = struct { gen_line: u32, gen_col: u32, orig_line: u32, orig_col: u32 };
 
     pub fn init(options: Options) State {
         return .{ .options = options, .source = options.source orelse "" };
@@ -97,17 +92,12 @@ pub const State = struct {
     }
 
     inline fn isPlainAscii(bytes: []const u8) bool {
-        const N = 16;
-        const Vec = @Vector(N, u8);
-        const hi: Vec = @splat(0x80);
-        const lf: Vec = @splat('\n');
-        const cr: Vec = @splat('\r');
         var i: usize = 0;
-        while (i + N <= bytes.len) : (i += N) {
-            const chunk: Vec = bytes[i..][0..N].*;
-            if (@reduce(.Or, chunk >= hi) or
-                @reduce(.Or, chunk == lf) or
-                @reduce(.Or, chunk == cr)) return false;
+        while (i + 16 <= bytes.len) : (i += 16) {
+            const chunk = Simd.loadChunk(bytes, i);
+            const special = (chunk >= Simd.splat(0x80)) | (chunk == Simd.splat('\n')) |
+                (chunk == Simd.splat('\r'));
+            if (@reduce(.Or, special)) return false;
         }
         while (i < bytes.len) : (i += 1) {
             if (bytes[i] >= 0x80 or bytes[i] == '\n' or bytes[i] == '\r') return false;
@@ -125,27 +115,24 @@ pub const State = struct {
         col_offset: u32,
     ) Allocator.Error!void {
         const gen_col = self.gen_col + col_offset;
-        if (self.has_pending and
-            self.pending.gen_line == self.gen_line and
-            self.pending.gen_col == gen_col)
-        {
-            self.pending.orig_line = orig_line;
-            self.pending.orig_col = orig_col;
-            return;
+        if (self.pending) |*pending| {
+            if (pending.gen_line == self.gen_line and pending.gen_col == gen_col) {
+                pending.orig_line = orig_line;
+                pending.orig_col = orig_col;
+                return;
+            }
+            try self.flush(allocator, pending.*);
         }
-        if (self.has_pending) try self.flush(allocator);
         self.pending = .{
             .gen_line = self.gen_line,
             .gen_col = gen_col,
             .orig_line = orig_line,
             .orig_col = orig_col,
         };
-        self.has_pending = true;
     }
 
-    fn flush(self: *State, allocator: Allocator) Allocator.Error!void {
-        const seg = self.pending;
-        const gen_line: i32 = @intCast(seg.gen_line);
+    fn flush(self: *State, allocator: Allocator, segment: Segment) Allocator.Error!void {
+        const gen_line: i32 = @intCast(segment.gen_line);
         const line_gap: usize = @intCast(gen_line - self.enc_gen_line);
 
         const needed = line_gap + 2 + 3 * 7;
@@ -171,16 +158,16 @@ pub const State = struct {
         }
         self.first_in_line = false;
 
-        const gen_col: i32 = @intCast(seg.gen_col);
+        const gen_col: i32 = @intCast(segment.gen_col);
         dst = writeVlq(dst, gen_col - self.prev_gen_col);
         self.prev_gen_col = gen_col;
         // the source index delta, always zero with one source
         dst[0] = 'A';
         dst += 1;
-        const orig_line: i32 = @intCast(seg.orig_line);
+        const orig_line: i32 = @intCast(segment.orig_line);
         dst = writeVlq(dst, orig_line - self.prev_orig_line);
         self.prev_orig_line = orig_line;
-        const orig_col: i32 = @intCast(seg.orig_col);
+        const orig_col: i32 = @intCast(segment.orig_col);
         dst = writeVlq(dst, orig_col - self.prev_orig_col);
         self.prev_orig_col = orig_col;
 
@@ -188,23 +175,18 @@ pub const State = struct {
     }
 
     pub fn build(self: *State, allocator: Allocator) Allocator.Error!SourceMap {
-        if (self.has_pending) {
-            try self.flush(allocator);
-            self.has_pending = false;
-        }
+        if (self.pending) |pending| try self.flush(allocator, pending);
+        self.pending = null;
         const mappings = try self.out.toOwnedSlice(allocator);
         errdefer allocator.free(mappings);
 
-        const sources = try allocator.alloc([]const u8, 1);
+        const sources = try allocator.dupe([]const u8, &.{self.options.source_file_name orelse ""});
         errdefer allocator.free(sources);
-        sources[0] = self.options.source_file_name orelse "";
 
-        var sources_content: ?[]const ?[]const u8 = null;
-        if (self.options.sources_content) |content| {
-            const sc = try allocator.alloc(?[]const u8, 1);
-            sc[0] = content;
-            sources_content = sc;
-        }
+        const sources_content: ?[]const ?[]const u8 = if (self.options.sources_content) |content|
+            try allocator.dupe(?[]const u8, &.{content})
+        else
+            null;
 
         return .{
             .file = self.options.file,

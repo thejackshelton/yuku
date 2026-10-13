@@ -5,63 +5,42 @@ const REGEXP_PREFIX = "(RegExp) ";
 const NUMBER_PREFIX = "(Number) ";
 const REGEXP_LITERAL = /^\/(.+)\/([dgimsuyv]*)$/;
 const TAB_WIDTH = 4;
+const UNCOMPARED_KEYS = new Set(["start", "end", "comments"]);
 
-// json has no bigint, regexp, or non-finite number, so snapshots store them as tagged strings
-export function serializeAstJson(obj: unknown, space?: string | number): string {
+// JSON has no bigint, regexp, or non-finite number, so snapshots store them as tagged strings
+export function serializeAstJson(data: unknown, space?: string | number): string {
   return JSON.stringify(
-    obj,
+    data,
     (_, value) => {
-      if (typeof value === "bigint") {
-        return `${BIG_INT_PREFIX}${value}n`;
-      }
-
-      if (value instanceof RegExp) {
-        return `${REGEXP_PREFIX}${value.toString()}`;
-      }
-
-      if (typeof value === "number" && !Number.isFinite(value)) {
-        return `${NUMBER_PREFIX}${value}`;
-      }
-
+      if (typeof value === "bigint") return `${BIG_INT_PREFIX}${value}n`;
+      if (value instanceof RegExp) return `${REGEXP_PREFIX}${value.toString()}`;
+      if (typeof value === "number" && !Number.isFinite(value)) return `${NUMBER_PREFIX}${value}`;
       return value;
     },
     space,
   );
 }
 
-export function deserializeAstJson(jsonString: string): unknown {
-  return JSON.parse(jsonString, (_, value) => {
+export function deserializeAstJson(json: string): unknown {
+  return JSON.parse(json, (_, value) => {
     if (typeof value === "object" && value !== null && typeof value.value === "bigint") {
       value.bigint = value.value.toString();
       return value;
     }
-
-    if (typeof value !== "string") {
-      return value;
-    }
-
+    if (typeof value !== "string") return value;
     if (value.startsWith(BIG_INT_PREFIX)) {
       return BigInt(value.slice(BIG_INT_PREFIX.length).replace(/n$/, "").replaceAll("_", ""));
     }
-
-    if (value.startsWith(NUMBER_PREFIX)) {
-      return Number(value.slice(NUMBER_PREFIX.length));
-    }
-
+    if (value.startsWith(NUMBER_PREFIX)) return Number(value.slice(NUMBER_PREFIX.length));
     if (value.startsWith(REGEXP_PREFIX)) {
       const match = value.slice(REGEXP_PREFIX.length).match(REGEXP_LITERAL);
-
-      if (match) {
-        try {
-          return new RegExp(match[1]!, match[2]);
-        } catch {
-          return null;
-        }
+      if (match === null) return null;
+      try {
+        return new RegExp(match[1]!, match[2]);
+      } catch {
+        return null;
       }
-
-      return null;
     }
-
     return value;
   });
 }
@@ -73,201 +52,157 @@ export function astDiffPath(a: unknown, b: unknown, path = "program"): string | 
     return null;
   }
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
-    return `${path}: ${showValue(a)} != ${showValue(b)}`;
+    return showDifference(path, a, b);
   }
 
   if (a instanceof RegExp || b instanceof RegExp) {
-    return a instanceof RegExp &&
-      b instanceof RegExp &&
-      a.source === b.source &&
-      a.flags === b.flags
-      ? null
-      : `${path}: ${showValue(a)} != ${showValue(b)}`;
+    const same =
+      a instanceof RegExp && b instanceof RegExp && a.source === b.source && a.flags === b.flags;
+    return same ? null : showDifference(path, a, b);
   }
 
   if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b)) {
-      return `${path}: ${showValue(a)} != ${showValue(b)}`;
-    }
-    if (a.length !== b.length) {
-      return `${path}: array length ${a.length} != ${b.length}`;
-    }
+    if (!Array.isArray(a) || !Array.isArray(b)) return showDifference(path, a, b);
+    if (a.length !== b.length) return `${path}: array length ${a.length} != ${b.length}`;
     for (let i = 0; i < a.length; i++) {
-      const d = astDiffPath(a[i], b[i], `${path}[${i}]`);
-      if (d) return d;
+      const difference = astDiffPath(a[i], b[i], `${path}[${i}]`);
+      if (difference) return difference;
     }
     return null;
   }
 
   const aKeys = comparableKeys(a);
   const bKeys = comparableKeys(b);
-  if (aKeys.length !== bKeys.length || aKeys.some((k, i) => k !== bKeys[i])) {
+  if (aKeys.length !== bKeys.length || aKeys.some((key, i) => key !== bKeys[i])) {
     return `${path}: keys [${aKeys.join(", ")}] != [${bKeys.join(", ")}]`;
   }
   for (const key of aKeys) {
-    const d = astDiffPath(
+    const difference = astDiffPath(
       (a as Record<string, unknown>)[key],
       (b as Record<string, unknown>)[key],
       `${path}.${key}`,
     );
-    if (d) return d;
+    if (difference) return difference;
   }
   return null;
 }
 
+function showDifference(path: string, a: unknown, b: unknown): string {
+  return `${path}: ${showValue(a)} != ${showValue(b)}`;
+}
+
 function comparableKeys(node: object): string[] {
-  const n = node as { type?: unknown; value?: unknown };
+  const { type, value } = node as { type?: unknown; value?: unknown };
   const skipRaw =
-    n.type === "Literal" &&
-    (typeof n.value === "string" || typeof n.value === "bigint" || "regex" in n);
+    type === "Literal" &&
+    (typeof value === "string" || typeof value === "bigint" || "regex" in node);
   return Object.keys(node)
-    .filter(
-      (k) =>
-        k !== "start" && k !== "end" && k !== "comments" && !(skipRaw && k === "raw"),
-    )
+    .filter((key) => !UNCOMPARED_KEYS.has(key) && !(skipRaw && key === "raw"))
     .sort();
 }
 
-function showValue(v: unknown): string {
-  const s = v === undefined ? "undefined" : serializeAstJson(v);
-  return s.length > 80 ? `${s.slice(0, 77)}...` : s;
+function showValue(value: unknown): string {
+  const text = value === undefined ? "undefined" : serializeAstJson(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
-interface Pos {
+interface Position {
   line: number;
-  col: number;
+  column: number;
 }
 
 interface LineMarker {
   line: number;
-  startCol: number;
-  endCol: number;
+  columnStart: number;
+  columnEnd: number;
   message: string;
   isPrimary: boolean;
 }
 
-function offsetToPos(source: string, offset: number): Pos {
-  const o = Math.max(0, Math.min(offset, source.length));
+function positionOf(source: string, offset: number): Position {
+  const end = Math.max(0, Math.min(offset, source.length));
   let line = 0;
-  let col = 0;
-  for (let i = 0; i < o; i++) {
+  let column = 0;
+  for (let i = 0; i < end; i++) {
     if (source[i] === "\n") {
       line++;
-      col = 0;
+      column = 0;
     } else {
-      col++;
+      column++;
     }
   }
-  return { line, col };
+  return { line, column };
 }
 
 function expandTabs(text: string): string {
   let out = "";
-  for (const ch of text) {
-    if (ch === "\t") {
-      out += " ".repeat(TAB_WIDTH - (out.length % TAB_WIDTH));
-    } else {
-      out += ch;
-    }
+  for (const char of text) {
+    out += char === "\t" ? " ".repeat(TAB_WIDTH - (out.length % TAB_WIDTH)) : char;
   }
   return out;
 }
 
-function mapCol(text: string, col: number): number {
-  let expanded = 0;
-  const end = Math.min(col, text.length);
-  for (let i = 0; i < end; i++) {
-    if (text[i] === "\t") {
-      expanded += TAB_WIDTH - (expanded % TAB_WIDTH);
-    } else {
-      expanded++;
-    }
-  }
-  return expanded;
-}
-
-function buildMarkers(source: string, sourceLines: string[], diag: Diagnostic): LineMarker[] {
+function buildMarkers(source: string, lines: string[], diagnostic: Diagnostic): LineMarker[] {
   const markers: LineMarker[] = [];
 
   const addSpan = (start: number, end: number, message: string, isPrimary: boolean) => {
-    const s = offsetToPos(source, start);
-    const e = offsetToPos(source, Math.max(end, start + 1));
-
-    if (s.line === e.line) {
-      markers.push({
-        line: s.line,
-        startCol: s.col,
-        endCol: Math.max(e.col, s.col + 1),
-        message,
-        isPrimary,
-      });
-    } else {
-      const firstLineLen = sourceLines[s.line]?.length ?? 0;
-      markers.push({
-        line: s.line,
-        startCol: s.col,
-        endCol: Math.max(firstLineLen, s.col + 1),
-        message: "",
-        isPrimary,
-      });
-      for (let ln = s.line + 1; ln < e.line; ln++) {
-        const len = sourceLines[ln]?.length ?? 0;
-        if (len > 0) {
-          markers.push({
-            line: ln,
-            startCol: 0,
-            endCol: len,
-            message: "",
-            isPrimary,
-          });
-        }
-      }
-      markers.push({
-        line: e.line,
-        startCol: 0,
-        endCol: Math.max(e.col, 1),
-        message,
-        isPrimary,
-      });
+    const from = positionOf(source, start);
+    const to = positionOf(source, Math.max(end, start + 1));
+    if (from.line === to.line) {
+      const columnEnd = Math.max(to.column, from.column + 1);
+      markers.push({ line: from.line, columnStart: from.column, columnEnd, message, isPrimary });
+      return;
     }
+    const firstLength = lines[from.line]?.length ?? 0;
+    const firstEnd = Math.max(firstLength, from.column + 1);
+    markers.push({
+      line: from.line,
+      columnStart: from.column,
+      columnEnd: firstEnd,
+      message: "",
+      isPrimary,
+    });
+    for (let line = from.line + 1; line < to.line; line++) {
+      const length = lines[line]?.length ?? 0;
+      if (length === 0) continue;
+      markers.push({ line, columnStart: 0, columnEnd: length, message: "", isPrimary });
+    }
+    const lastEnd = Math.max(to.column, 1);
+    markers.push({ line: to.line, columnStart: 0, columnEnd: lastEnd, message, isPrimary });
   };
 
-  addSpan(diag.start, diag.end, "", true);
-  for (const label of diag.labels) {
-    addSpan(label.start, label.end, label.message, false);
-  }
-
+  addSpan(diagnostic.start, diagnostic.end, "", true);
+  for (const label of diagnostic.labels) addSpan(label.start, label.end, label.message, false);
   return markers;
 }
 
-function renderUnderlines(rawLine: string, markers: LineMarker[], gutter: string): string[] {
+function renderUnderlines(line: string, markers: LineMarker[], gutter: string): string[] {
   const rows: string[] = [];
   const sorted = [...markers].sort((a, b) => {
     if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1;
-    return a.startCol - b.startCol;
+    return a.columnStart - b.columnStart;
   });
-
   const placed: { start: number; end: number }[][] = [];
 
   for (const marker of sorted) {
-    const expStart = mapCol(rawLine, marker.startCol);
-    const expEnd = mapCol(rawLine, marker.endCol);
-    const width = Math.max(expEnd - expStart, 1);
-    const msg = marker.message ? ` ${marker.message}` : "";
-    const totalEnd = expStart + width + msg.length;
+    const start = expandTabs(line.slice(0, marker.columnStart)).length;
+    const end = expandTabs(line.slice(0, marker.columnEnd)).length;
+    const width = Math.max(end - start, 1);
+    const message = marker.message ? ` ${marker.message}` : "";
+    const labelEnd = start + width + message.length;
 
-    let rowIdx = placed.findIndex((row) =>
-      row.every((e) => totalEnd <= e.start || expStart >= e.end),
+    let row = placed.findIndex((spans) =>
+      spans.every((span) => labelEnd <= span.start || start >= span.end),
     );
-    if (rowIdx === -1) {
-      rowIdx = placed.length;
+    if (row === -1) {
+      row = placed.length;
       placed.push([]);
     }
-    placed[rowIdx]!.push({ start: expStart, end: totalEnd });
+    placed[row]!.push({ start, end: labelEnd });
 
-    while (rows.length <= rowIdx) rows.push("");
-    const ch = marker.isPrimary ? "^" : "~";
-    rows[rowIdx] = gutter + " ".repeat(expStart) + ch.repeat(width) + msg;
+    while (rows.length <= row) rows.push("");
+    const mark = marker.isPrimary ? "^" : "~";
+    rows[row] = gutter + " ".repeat(start) + mark.repeat(width) + message;
   }
 
   return rows;
@@ -284,68 +219,60 @@ export function formatDiagnostics(
   filename: string,
   options?: FormatDiagnosticsOptions,
 ): string {
-  const sourceLines = source.split("\n");
+  const lines = source.split("\n");
   const output: string[] = [];
 
-  for (let di = 0; di < diagnostics.length; di++) {
-    const diag = diagnostics[di]!;
-    const pos = offsetToPos(source, diag.start);
-    const markers = buildMarkers(source, sourceLines, diag);
+  for (let index = 0; index < diagnostics.length; index++) {
+    const diagnostic = diagnostics[index]!;
+    const position = positionOf(source, diagnostic.start);
+    const markers = buildMarkers(source, lines, diagnostic);
 
     const markersByLine = new Map<number, LineMarker[]>();
-    for (const m of markers) {
-      if (!markersByLine.has(m.line)) markersByLine.set(m.line, []);
-      markersByLine.get(m.line)?.push(m);
+    for (const marker of markers) {
+      const group = markersByLine.get(marker.line);
+      if (group === undefined) markersByLine.set(marker.line, [marker]);
+      else group.push(marker);
     }
 
-    const affectedLines = new Set(markers.map((m) => m.line));
-    const contextLines = new Set<number>();
-    for (const ln of affectedLines) {
-      for (let d = -1; d <= 1; d++) {
-        const n = ln + d;
-        if (n >= 0 && n < sourceLines.length) contextLines.add(n);
+    const shown = new Set<number>();
+    for (const { line } of markers) {
+      for (let neighbor = line - 1; neighbor <= line + 1; neighbor++) {
+        if (neighbor >= 0 && neighbor < lines.length) shown.add(neighbor);
       }
     }
 
-    const displayLines = [...contextLines].sort((a, b) => a - b);
-    const maxNum = displayLines.length > 0 ? displayLines[displayLines.length - 1]! + 1 : 1;
-    const gw = Math.max(String(maxNum).length, 2);
-    const pad = (n: number) => String(n).padStart(gw);
-    const lineGutter = (n: number) => `${pad(n + 1)} | `;
-    const emptyGutter = `${" ".repeat(gw)} | `;
-    const blankGutter = `${" ".repeat(gw)} |`;
+    const displayed = [...shown].sort((a, b) => a - b);
+    const lineNumberMax = displayed.length > 0 ? displayed[displayed.length - 1]! + 1 : 1;
+    const gutterWidth = Math.max(String(lineNumberMax).length, 2);
+    const blank = " ".repeat(gutterWidth);
 
-    output.push(`${diag.severity}: ${diag.message}`);
+    output.push(`${diagnostic.severity}: ${diagnostic.message}`);
     if (options?.showFilename !== false) {
-      output.push(`${" ".repeat(gw)} --> ${filename}:${pos.line + 1}:${pos.col + 1}`);
+      output.push(`${blank} --> ${filename}:${position.line + 1}:${position.column + 1}`);
     }
-    output.push(blankGutter);
+    output.push(`${blank} |`);
 
-    let prev = -2;
-    for (const ln of displayLines) {
-      if (prev >= 0 && ln > prev + 1) {
-        output.push(`${".".repeat(gw)} |`);
-      }
-      prev = ln;
+    let previous = -2;
+    for (const line of displayed) {
+      if (previous >= 0 && line > previous + 1) output.push(`${".".repeat(gutterWidth)} |`);
+      previous = line;
 
-      output.push(lineGutter(ln) + expandTabs(sourceLines[ln] ?? ""));
-
-      const lineM = markersByLine.get(ln);
-      if (lineM && lineM.length > 0) {
-        for (const row of renderUnderlines(sourceLines[ln] ?? "", lineM, emptyGutter)) {
-          output.push(row);
-        }
+      const text = lines[line] ?? "";
+      output.push(`${String(line + 1).padStart(gutterWidth)} | ${expandTabs(text)}`);
+      const lineMarkers = markersByLine.get(line);
+      if (lineMarkers !== undefined) {
+        output.push(...renderUnderlines(text, lineMarkers, `${blank} | `));
       }
     }
 
-    output.push(blankGutter);
+    output.push(`${blank} |`);
 
-    if (diag.help) {
-      output.push(`${" ".repeat(gw)} = help: ${diag.help}`);
+    if (diagnostic.help) {
+      output.push(`${blank} = help: ${diagnostic.help}`);
       output.push("");
     }
 
-    if (di < diagnostics.length - 1) output.push("");
+    if (index < diagnostics.length - 1) output.push("");
   }
 
   return output.join("\n");

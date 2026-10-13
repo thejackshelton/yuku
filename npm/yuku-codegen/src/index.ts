@@ -1,6 +1,6 @@
 import type { Comment, Diagnostic, Node } from "@yuku-toolchain/types";
 
-import { print, type PrintOptions } from "./printer.js";
+import { print, type PrintOptions, type Printers } from "./printer.js";
 import { encodeMappings, Mappings } from "./sourcemap.js";
 
 export type Format = "pretty" | "compact";
@@ -18,6 +18,7 @@ export type Quotes = "preserve" | "double" | "single" | "shortest";
 export type Comments = boolean | "all" | "some" | "none" | "line" | "block";
 
 export type { Comment, Diagnostic };
+export type { Printer, Printers } from "./printer.js";
 
 export interface SourceMapOptions {
   /** The original source text. Required to emit a map. */
@@ -64,6 +65,8 @@ export interface GenerateOptions {
   /** @default "some" */
   comments?: Comments;
   sourceMap?: SourceMapOptions;
+  /** Prints the node types the printer does not know, such as a dialect's, by `type`. */
+  print?: Printers;
 }
 
 export interface SourceMap {
@@ -82,7 +85,7 @@ export interface GenerateResult {
   map: SourceMap | null;
 }
 
-const QUOTES: readonly Quotes[] = ["preserve", "double", "single", "shortest"];
+const QUOTES = ["preserve", "double", "single", "shortest"] as const;
 const COMMENTS = ["none", "all", "some", "line", "block"] as const;
 
 /** Prints a `Program` or any single node back to source. */
@@ -143,6 +146,11 @@ function resolveOptions(options: GenerateOptions): PrintOptions {
     );
   }
 
+  const print = options.print ?? {};
+  if (typeof print !== "object" || print === null) {
+    throw new TypeError("`print` must be an object of functions by node type");
+  }
+
   return {
     strip: options.strip === true,
     minify: minify.syntax === true,
@@ -150,5 +158,6 @@ function resolveOptions(options: GenerateOptions): PrintOptions {
     indent,
     quotes,
     comments,
+    print,
   };
 }

@@ -10,17 +10,35 @@
   "type": "module",
   "main": "index.js",
   "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./wasm": "./wasm.js",
+    "./yuku.wasm": "./yuku.wasm",
+    "./package.json": "./package.json"
+  },
+  "imports": {
+    "#module": {
+      "workerd": "./module/workerd.js",
+      "node": "./module/node.js",
+      "default": "./module/browser.js"
+    }
+  },
   "engines": {
-    "node": ">=14.18.0"
+    "node": ">=18.0.0"
   },
   "files": [
     "index.js",
     "index.d.ts",
-    "decode.js"
+    "decode.js",
+    "wasm.js",
+    "module",
+    "yuku.wasm"
   ],
   "dependencies": {
-    "@yuku-toolchain/types": "workspace:^",
-    "yuku-core": "workspace:*"
+    "@yuku-toolchain/types": "workspace:^"
   },
   "keywords": [
     "acorn",

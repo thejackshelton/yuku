@@ -231,11 +231,11 @@ pub fn isIndexSignatureStart(parser: *Parser) bool {
     var peek = parser.beginPeek();
     defer peek.end();
 
-    const t1 = peek.next();
-    if (!t1.tag.isIdentifierLike()) return false;
+    const name = peek.next();
+    if (!name.tag.isIdentifierLike()) return false;
 
-    const t2 = peek.next();
-    return t2.tag == .colon or t2.tag == .comma;
+    const after_name = peek.next();
+    return after_name.tag == .colon or after_name.tag == .comma;
 }
 
 inline fn canFollowAccessorKeyword(tag: TokenTag) bool {
@@ -300,7 +300,7 @@ pub const IndexSignatureModifiers = struct {
 pub fn parseIndexSignature(
     parser: *Parser,
     start: u32,
-    mods: IndexSignatureModifiers,
+    modifiers: IndexSignatureModifiers,
 ) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .left_bracket);
     try parser.advance() orelse return null;
@@ -337,8 +337,8 @@ pub fn parseIndexSignature(
         .{ .ts_index_signature = .{
             .parameters = parameters,
             .type_annotation = type_annotation,
-            .readonly = mods.readonly,
-            .static = mods.static,
+            .readonly = modifiers.readonly,
+            .static = modifiers.static,
         } },
         .{ .start = start, .end = parser.tree.span(type_annotation).end },
     );

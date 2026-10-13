@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { load } from "@yuku-core/wasm";
 import { Analyzer, analyze } from "yuku-analyzer";
 import { summary } from "./utils/summarize";
 
@@ -102,11 +101,9 @@ describe("ambient global augmentation", () => {
 });
 
 describe("deep trees", () => {
-  test("a private name deep in a chain resolves to its class", async () => {
+  test("a private name deep in a chain resolves to its class", () => {
     const source = `class A { #a = 1; m() { return this.#a${".b(x)".repeat(1000)}; } }`;
-    for (const core of [undefined, await load()]) {
-      expect(analyze(source, { core, path: "input.js" }).diagnostics).toEqual([]);
-    }
+    expect(analyze(source, { path: "input.js" }).diagnostics).toEqual([]);
   });
 
   test("parentOf climbs from the deepest node to the root", () => {

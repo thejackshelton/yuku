@@ -190,9 +190,10 @@ fn fetchUnicodeData(io: std.Io, gpa: std.mem.Allocator) !void {
     try http_req.sendBodiless();
     var http_resp = try http_req.receiveHead(&.{});
 
-    const zip_file = try std.Io.Dir.cwd().createFile(io, temp_zip_path, .{});
+    const cwd = std.Io.Dir.cwd();
+    const zip_file = try cwd.createFile(io, temp_zip_path, .{});
     defer zip_file.close(io);
-    defer std.Io.Dir.cwd().deleteFile(io, temp_zip_path) catch @panic("Zip deletion failed");
+    defer cwd.deleteFile(io, temp_zip_path) catch @panic("Zip deletion failed");
 
     var zip_file_writer = zip_file.writer(io, &.{});
     const zip_writer = &zip_file_writer.interface;
@@ -201,13 +202,13 @@ fn fetchUnicodeData(io: std.Io, gpa: std.mem.Allocator) !void {
     const resp_reader = http_resp.reader(&resp_buf);
     _ = try resp_reader.streamRemaining(zip_writer);
 
-    std.Io.Dir.cwd().deleteTree(io, extraction_path) catch {};
-    std.Io.Dir.cwd().createDir(io, extraction_path, .default_dir) catch {};
+    cwd.deleteTree(io, extraction_path) catch {};
+    cwd.createDir(io, extraction_path, .default_dir) catch {};
 
-    var extract_dir = try std.Io.Dir.cwd().openDir(io, extraction_path, .{});
+    var extract_dir = try cwd.openDir(io, extraction_path, .{});
     defer extract_dir.close(io);
 
-    const archive = try std.Io.Dir.cwd().openFile(io, temp_zip_path, .{});
+    const archive = try cwd.openFile(io, temp_zip_path, .{});
     defer archive.close(io);
 
     var archive_buf: [1024]u8 = undefined;
@@ -225,42 +226,23 @@ fn pathExists(io: std.Io, path: []const u8) bool {
 
 // the u8 root table indexes at most 256 unique leaf chunks
 fn emitTableStructure(data: TableData, writer: *std.Io.Writer, table_name: []const u8) !void {
-    try writer.print(
-        \\
-        \\pub const {s}_root = [_]u8{{
-    , .{table_name});
-
-    for (0.., data.root) |idx, val| {
-        if (idx % 16 == 0) {
-            try writer.writeAll("\n    ");
-        } else {
-            try writer.writeAll(" ");
-        }
-        try writer.print("0x{x:0>2},", .{val});
-    }
-    try writer.writeAll(
-        \\
-        \\};
-        \\
-    );
-
-    try writer.print(
-        \\
-        \\pub const {s}_leaf = [_]u64{{
-    , .{table_name});
-    for (0.., data.leaf) |idx, val| {
-        if (idx % 8 == 0) {
-            try writer.writeAll("\n    ");
-        } else {
-            try writer.writeAll(" ");
-        }
-        try writer.print("0x{x:0>2},", .{val});
-    }
-    try writer.writeAll(
-        \\
-        \\};
-        \\
-    );
-
+    try emitArray(writer, table_name, "root", "u8", data.root, 16);
+    try emitArray(writer, table_name, "leaf", "u64", data.leaf, 8);
     std.log.info("Successfully wrote {s} to {s}", .{ table_name, output_table_path });
+}
+
+fn emitArray(
+    writer: *std.Io.Writer,
+    table_name: []const u8,
+    part: []const u8,
+    element_type: []const u8,
+    values: []const u32,
+    values_per_line: u32,
+) !void {
+    try writer.print("\npub const {s}_{s} = [_]{s}{{", .{ table_name, part, element_type });
+    for (values, 0..) |value, index| {
+        try writer.writeAll(if (index % values_per_line == 0) "\n    " else " ");
+        try writer.print("0x{x:0>2},", .{value});
+    }
+    try writer.writeAll("\n};\n");
 }

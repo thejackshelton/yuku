@@ -229,15 +229,10 @@ describe("node queries", () => {
   });
 
   test("parentOf climbs from a node to the structure around it", () => {
-    const module = analyze(
-      `const { onPress: handler } = props; const alias = handler;`,
-      "input.ts",
-    );
-    // a destructured binding climbs to the Property that names the prop
-    const handler = module
-      .findAll("Identifier")
-      .find((n) => n.name === "handler" && module.bindingOf(n))!;
-    const property = module.parentOf(handler)!;
+    const source = `const { onPress: handler } = props; const alias = handler;`;
+    const module = analyze(source, "input.ts");
+    const handlers = module.findAll("Identifier").filter((node) => node.name === "handler");
+    const property = module.parentOf(handlers.find((node) => module.bindingOf(node))!)!;
     expect(
       property.type === "Property" && property.key.type === "Identifier"
         ? property.key.name
@@ -245,8 +240,7 @@ describe("node queries", () => {
     ).toBe("onPress");
     expect(module.parentOf(property)?.type).toBe("ObjectPattern");
 
-    // a use climbs to the declarator whose init it is
-    const use = module.findAll("Identifier").find((n) => n.name === "handler" && module.referenceOf(n))!;
+    const use = handlers.find((node) => module.referenceOf(node))!;
     const declarator = module.parentOf(use)!;
     expect(declarator.type === "VariableDeclarator" ? declarator.init : null).toBe(use);
   });

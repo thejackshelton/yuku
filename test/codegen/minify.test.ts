@@ -29,12 +29,13 @@ const g = 1234.5;`,
 });
 
 test("escapes script-close sequences in strings and untagged templates", () => {
-  expect(
-    gen(
-      'const a = "</script>";\nconst b = "<!-- c -->";\nconst c = `</script>${1}<!-- -->`;\nconst d = "x-->y";',
-      MINIFY,
-    ),
-  ).toMatchInlineSnapshot(
+  const source = [
+    'const a = "</script>";',
+    'const b = "<!-- c -->";',
+    "const c = `</script>${1}<!-- -->`;",
+    'const d = "x-->y";',
+  ].join("\n");
+  expect(gen(source, MINIFY)).toMatchInlineSnapshot(
     `"const a="<\\/script>";const b="<\\!-- c --\\>";const c=\`<\\/script>\${1}<\\!-- --\\>\`;const d="x--\\>y""`,
   );
 });

@@ -5,13 +5,14 @@ const parser = @import("parser");
 
 const ast = parser.ast;
 const semantic = parser.semantic;
-const Allocator = std.mem.Allocator;
+const Semantic = semantic.Semantic;
+const testing = std.testing;
 
 pub const NodeTag = std.meta.Tag(ast.NodeData);
 
 pub const Analyzed = struct {
     tree: ast.Tree,
-    sem: semantic.Semantic,
+    sem: Semantic,
 
     pub fn deinit(self: *Analyzed) void {
         self.tree.deinit();
@@ -29,8 +30,8 @@ pub const Analyzed = struct {
         return findFirst(&self.tree, tag) orelse error.NodeNotFound;
     }
 
-    pub fn symbolNamed(self: *const Analyzed, name: []const u8) !semantic.Semantic.SymbolEntry {
-        var found: ?semantic.Semantic.SymbolEntry = null;
+    pub fn symbolNamed(self: *const Analyzed, name: []const u8) !Semantic.SymbolEntry {
+        var found: ?Semantic.SymbolEntry = null;
         var it = self.sem.iterSymbols();
         while (it.next()) |entry| {
             if (std.mem.eql(u8, self.tree.string(entry.symbol.name), name)) {
@@ -44,8 +45,8 @@ pub const Analyzed = struct {
     pub fn symbolsNamed(
         self: *const Analyzed,
         name: []const u8,
-        buf: []semantic.Semantic.SymbolEntry,
-    ) []semantic.Semantic.SymbolEntry {
+        buf: []Semantic.SymbolEntry,
+    ) []Semantic.SymbolEntry {
         var len: usize = 0;
         var it = self.sem.iterSymbols();
         while (it.next()) |entry| {
@@ -57,11 +58,8 @@ pub const Analyzed = struct {
         return buf[0..len];
     }
 
-    pub fn onlyReferenceNamed(
-        self: *const Analyzed,
-        name: []const u8,
-    ) !semantic.Semantic.ReferenceEntry {
-        var found: ?semantic.Semantic.ReferenceEntry = null;
+    pub fn onlyReferenceNamed(self: *const Analyzed, name: []const u8) !Semantic.ReferenceEntry {
+        var found: ?Semantic.ReferenceEntry = null;
         var it = self.sem.iterReferences();
         while (it.next()) |entry| {
             if (std.mem.eql(u8, self.tree.string(entry.reference.name), name)) {
@@ -81,8 +79,8 @@ pub inline fn repeat(comptime unit: []const u8, comptime count: u32) *const [uni
     }
 }
 
-pub fn analyze(gpa: Allocator, source: []const u8, opts: parser.Options) !Analyzed {
-    var result = try analyzeAllowErrors(gpa, source, opts);
+pub fn analyze(source: []const u8, opts: parser.Options) !Analyzed {
+    var result = try analyzeAllowErrors(source, opts);
     errdefer result.deinit();
     if (result.tree.hasErrors()) {
         for (result.tree.diagnostics.items) |diagnostic| {
@@ -93,8 +91,8 @@ pub fn analyze(gpa: Allocator, source: []const u8, opts: parser.Options) !Analyz
     return result;
 }
 
-pub fn analyzeAllowErrors(gpa: Allocator, source: []const u8, opts: parser.Options) !Analyzed {
-    var tree = try parser.parse(gpa, source, opts);
+pub fn analyzeAllowErrors(source: []const u8, opts: parser.Options) !Analyzed {
+    var tree = try parser.parse(testing.allocator, source, opts);
     errdefer tree.deinit();
     const sem = try semantic.analyze(&tree);
     return .{ .tree = tree, .sem = sem };
@@ -149,10 +147,11 @@ fn isSourceFile(basename: []const u8) bool {
     return false;
 }
 
-/// Calls `checker.check(path, &tree)` for every corpus file that parses cleanly, or skips
-/// the test when no corpus file does.
-pub fn forEachCorpusTree(gpa: Allocator, checker: anytype) !void {
-    const io = std.testing.io;
+/// Calls `check(path, &tree)` for every corpus file that parses cleanly, or skips the test
+/// when no corpus file does.
+pub fn forEachCorpusTree(check: anytype) !void {
+    const gpa = testing.allocator;
+    const io = testing.io;
     var checked: usize = 0;
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
@@ -182,7 +181,7 @@ pub fn forEachCorpusTree(gpa: Allocator, checker: anytype) !void {
             if (tree.hasErrors()) continue;
 
             const path = try std.mem.print(&path_buf, "{s}/{s}", .{ dir_path, entry.path });
-            try checker.check(path, &tree);
+            try check(path, &tree);
             checked += 1;
         }
     }

@@ -28,11 +28,9 @@ pub fn parseTypeAssertion(parser: *Parser) Error!?ast.NodeIndex {
 
     const expr = try expressions.parseExpression(parser, Precedence.Unary, .{}) orelse return null;
 
-    const end = parser.tree.span(expr).end;
-
     return try parser.tree.addNode(
         .{ .ts_type_assertion = .{ .type_annotation = type_node, .expression = expr } },
-        .{ .start = start, .end = end },
+        .{ .start = start, .end = parser.tree.span(expr).end },
     );
 }
 
@@ -55,7 +53,6 @@ pub fn parseAsOrSatisfiesExpression(parser: *Parser, left: ast.NodeIndex) Error!
     });
 }
 
-// optional chains handle their own `!`
 pub fn parseNonNullExpression(parser: *Parser, left: ast.NodeIndex) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .logical_not);
 

@@ -1,3 +1,4 @@
+// every printed identifier maps back to the same identifier in its source
 // https://fitzgen.com/2013/08/02/testing-source-maps.html
 
 import {
@@ -12,11 +13,12 @@ import { TraceMap, originalPositionFor, type EncodedSourceMap } from "@jridgewel
 import { CORPUS_DIRS, corpusFilesUnder, loadedProjects } from "../corpus";
 
 const OUT_FILE = "out.js";
+const SAMPLE_MAX = 8;
 
-let totalFiles = 0;
-let totalSkip = 0;
-let totalFail = 0;
-const sampleErrs: string[] = [];
+let checkedTotal = 0;
+let skippedTotal = 0;
+let failedTotal = 0;
+const samples: string[] = [];
 
 const groups = [
   ...CORPUS_DIRS.map((dir) => ({ dir, files: corpusFilesUnder(dir) })),
@@ -25,32 +27,27 @@ const groups = [
 
 for (const { dir, files } of groups) {
   const start = performance.now();
-  let dirFiles = 0;
-  let dirSkip = 0;
-  let dirFail = 0;
+  let checked = 0;
+  let skipped = 0;
+  let failed = 0;
 
-  for (const { path: file, relative: f, lang, sourceType } of files) {
-    const source = await Bun.file(file).text();
+  for (const { path, relative, lang, sourceType } of files) {
+    const source = await Bun.file(path).text();
 
     const input = parse(source, { lang, sourceType });
     if (input.diagnostics.length > 0) {
-      dirSkip++;
+      skipped++;
       continue;
     }
-    dirFiles++;
+    checked++;
 
     const result = generate(input.program, {
       comments: true,
-      sourceMap: {
-        source,
-        file: OUT_FILE,
-        sourceFileName: f,
-        sourcesContent: source,
-      },
+      sourceMap: { source, file: OUT_FILE, sourceFileName: relative, sourcesContent: source },
     });
     if (!result.map) {
-      dirFail++;
-      if (sampleErrs.length < 8) sampleErrs.push(`${file}: no map returned`);
+      failed++;
+      if (samples.length < SAMPLE_MAX) samples.push(`${path}: no map returned`);
       continue;
     }
 
@@ -58,27 +55,27 @@ for (const { dir, files } of groups) {
     // unparseable output is a codegen defect, caught by test/codegen
     if (output.diagnostics.length > 0) continue;
 
-    const errs = verify(source, input.program, result.code, output.program, result.map, f);
-    if (errs.length > 0) {
-      dirFail++;
-      if (sampleErrs.length < 8) sampleErrs.push(`${file}: ${errs[0]}`);
+    const errors = verify(source, input.program, result.code, output.program, result.map, relative);
+    if (errors.length > 0) {
+      failed++;
+      if (samples.length < SAMPLE_MAX) samples.push(`${path}: ${errors[0]}`);
     }
   }
 
   const ms = Math.round(performance.now() - start);
   console.log(
-    `  ${dir}: ${dirFiles - dirFail}/${dirFiles} (${ms}ms${dirSkip ? `, ${dirSkip} skipped` : ""})`,
+    `  ${dir}: ${checked - failed}/${checked} (${ms}ms${skipped ? `, ${skipped} skipped` : ""})`,
   );
-  totalFiles += dirFiles;
-  totalSkip += dirSkip;
-  totalFail += dirFail;
+  checkedTotal += checked;
+  skippedTotal += skipped;
+  failedTotal += failed;
 }
 
 console.log();
-for (const e of sampleErrs) console.log(`  ✗ ${e}`);
-const skipped = totalSkip ? `, ${totalSkip} skipped` : "";
-console.log(`\n  total: ${totalFiles - totalFail}/${totalFiles} round-trips verified${skipped}`);
-process.exit(totalFail > 0 ? 1 : 0);
+for (const sample of samples) console.log(`  ✗ ${sample}`);
+const verified = `${checkedTotal - failedTotal}/${checkedTotal} round-trips verified`;
+console.log(`\n  total: ${verified}${skippedTotal ? `, ${skippedTotal} skipped` : ""}`);
+process.exit(failedTotal > 0 ? 1 : 0);
 
 function verify(
   source: string,
@@ -86,53 +83,52 @@ function verify(
   code: string,
   outputAst: Program,
   map: SourceMap,
-  expectSourceFileName: string,
+  sourceFileName: string,
 ): string[] {
-  const errs: string[] = [];
+  const errors: string[] = [];
 
-  if (map.version !== 3) errs.push(`version: ${map.version}`);
-  if (map.file !== OUT_FILE) errs.push(`file: ${map.file}`);
-  if (
-    !Array.isArray(map.sources) ||
-    map.sources.length !== 1 ||
-    map.sources[0] !== expectSourceFileName
-  ) {
-    errs.push(`sources: ${JSON.stringify(map.sources)}`);
+  if (map.version !== 3) errors.push(`version: ${map.version}`);
+  if (map.file !== OUT_FILE) errors.push(`file: ${map.file}`);
+  const { sources } = map;
+  if (!Array.isArray(sources) || sources.length !== 1 || sources[0] !== sourceFileName) {
+    errors.push(`sources: ${JSON.stringify(sources)}`);
   }
   if (!map.sourcesContent || map.sourcesContent.length !== 1 || map.sourcesContent[0] !== source) {
-    errs.push(`sourcesContent mismatch`);
+    errors.push(`sourcesContent mismatch`);
   }
 
   let tracer: TraceMap;
   try {
     tracer = new TraceMap(toEncodedSourceMap(map));
-  } catch (e) {
-    errs.push(`tracer: ${(e as Error).message}`);
-    return errs;
+  } catch (error) {
+    errors.push(`tracer: ${(error as Error).message}`);
+    return errors;
   }
 
-  const inputIds = collectIdentifiers(inputAst);
+  const inputIdentifiers = collectIdentifiers(inputAst);
   const codeLines = lineStarts(code);
   const sourceLines = lineStarts(source);
   for (const node of walkNodes(outputAst)) {
     if (node.type !== "Identifier" && node.type !== "PrivateIdentifier") continue;
-    const { line, col } = lineColOf(codeLines, node.start);
-    const orig = originalPositionFor(tracer, { line: line + 1, column: col });
-    if (!orig.source) {
-      errs.push(`no mapping for ${node.type} "${node.name}" at gen ${line + 1}:${col}`);
+    const { line, column } = lineColumnOf(codeLines, node.start);
+    const original = originalPositionFor(tracer, { line: line + 1, column });
+    if (!original.source) {
+      errors.push(`no mapping for ${node.type} "${node.name}" at gen ${line + 1}:${column}`);
     } else {
-      const input = inputIds.get((sourceLines[orig.line - 1] ?? source.length) + orig.column);
-      const at = `gen "${node.name}" at ${line + 1}:${col} -> orig ${orig.line}:${orig.column}`;
+      const offset = (sourceLines[original.line - 1] ?? source.length) + original.column;
+      const input = inputIdentifiers.get(offset);
+      const at =
+        `gen "${node.name}" at ${line + 1}:${column} -> orig ${original.line}:${original.column}`;
       if (!input) {
-        errs.push(`${at}: no input identifier there`);
+        errors.push(`${at}: no input identifier there`);
       } else if (input.name !== node.name) {
-        errs.push(`${at} has "${input.name}"`);
+        errors.push(`${at} has "${input.name}"`);
       }
     }
-    if (errs.length > 4) return errs;
+    if (errors.length > 4) return errors;
   }
 
-  return errs;
+  return errors;
 }
 
 function collectIdentifiers(root: Program): Map<number, Identifier | PrivateIdentifier> {
@@ -172,31 +168,31 @@ function toEncodedSourceMap(map: SourceMap): EncodedSourceMap {
   };
 }
 
-// length of the line terminator at `i`, else 0
-function lineBreakLen(s: string, i: number): number {
-  const c = s.charCodeAt(i);
-  if (c === 13) return s.charCodeAt(i + 1) === 10 ? 2 : 1;
-  if (c === 10 || c === 0x2028 || c === 0x2029) return 1;
+// the length of the line terminator at `index`, else 0
+function lineBreakLength(text: string, index: number): number {
+  const code = text.charCodeAt(index);
+  if (code === 13) return text.charCodeAt(index + 1) === 10 ? 2 : 1;
+  if (code === 10 || code === 0x2028 || code === 0x2029) return 1;
   return 0;
 }
 
-function lineStarts(s: string): number[] {
+function lineStarts(text: string): number[] {
   const starts = [0];
-  for (let i = 0; i < s.length; ) {
-    const brk = lineBreakLen(s, i);
-    if (brk > 0) starts.push((i += brk));
-    else i++;
+  for (let index = 0; index < text.length; ) {
+    const length = lineBreakLength(text, index);
+    if (length > 0) starts.push((index += length));
+    else index++;
   }
   return starts;
 }
 
-function lineColOf(starts: number[], offset: number) {
-  let lo = 0;
-  let hi = starts.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (starts[mid]! <= offset) lo = mid;
-    else hi = mid - 1;
+function lineColumnOf(starts: number[], offset: number): { line: number; column: number } {
+  let low = 0;
+  let high = starts.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (starts[middle]! <= offset) low = middle;
+    else high = middle - 1;
   }
-  return { line: lo, col: offset - starts[lo]! };
+  return { line: low, column: offset - starts[low]! };
 }

@@ -1,11 +1,11 @@
-// Compares references, writes, declarations, and scopes with @typescript-eslint/scope-manager.
+// references, writes, declarations, and scopes against @typescript-eslint/scope-manager
 
 import { describe, expect, test } from "bun:test";
 import { analyze, type Scope as TheirScope } from "@typescript-eslint/scope-manager";
 import { parse as tsParse } from "@typescript-eslint/typescript-estree";
 import { analyze as analyzeFile, type Binding, type Module, type Scope } from "yuku-analyzer";
 import type { Node, SourceLang, SourceType } from "yuku-parser";
-import { corpusFiles, projectFiles, type CorpusFile } from "../corpus";
+import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
 import { differential, type Comparison, type Known } from "./utils/differential";
 
 const UNRESOLVED = -1;
@@ -274,5 +274,5 @@ describe("resolution agrees with @typescript-eslint/scope-manager", () => {
     });
   }
 
-  differential("corpus and projects", [...corpusFiles(), ...projectFiles()], compareFile, KNOWN);
+  differential("corpus and projects", corpusAndProjectFiles(), compareFile, KNOWN);
 });

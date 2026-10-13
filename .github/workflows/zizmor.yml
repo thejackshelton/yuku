@@ -1,8 +1,6 @@
 name: Zizmor
 
-# Static analysis of the workflows themselves: template injection,
-# over-broad token permissions, unpinned actions, and similar issues.
-# Findings surface in the repository's Security tab (code scanning).
+# audits the workflows themselves, reporting to the Security tab
 
 on:
   push:

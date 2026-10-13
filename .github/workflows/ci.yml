@@ -103,14 +103,11 @@ jobs:
       - name: Load test data
         run: bun run fetch:fixtures
 
-      - name: Build native binding
-        run: bun run build:local
-
       - name: Zig build
         run: zig build
 
-      - name: Build the WebAssembly core
-        run: bun run build:wasm
+      - name: Build the npm packages
+        run: bun run build
 
       - name: Zig tests
         run: zig build test
@@ -135,9 +132,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:ast
 
-      - name: WebAssembly parity
+      - name: Dialect
         if: ${{ !cancelled() }}
-        run: bun run test:wasm
+        run: bun run test:dialect
 
       - name: Typecheck
         if: ${{ !cancelled() }}

@@ -46,9 +46,7 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
 
         const element = try expressions.parseExpression(parser, Precedence.Assignment, .{}) orelse
             return null;
-
         try parser.scratch_cover.append(parser.allocator(), element);
-
         end = parser.tree.span(element).end;
 
         if (parser.current_token.tag == .comma) {
@@ -79,13 +77,10 @@ pub fn parseCover(parser: *Parser) Error!?ParenthesizedCover {
     }
 
     end = parser.current_token.span.end;
-
     try parser.advance() orelse return null; // consume )
 
-    const elements = try parser.flushToExtras(&parser.scratch_cover, checkpoint);
-
     return .{
-        .elements = elements,
+        .elements = try parser.flushToExtras(&parser.scratch_cover, checkpoint),
         .start = start,
         .end = end,
         .has_trailing_comma = has_trailing_comma,
@@ -139,7 +134,6 @@ pub fn coverToParenthesizedExpression(
                 "Rest element is not allowed in parenthesized expression",
                 .{ .help = "Spread in parentheses is only valid for arrow function parameters." },
             );
-
             return null;
         }
     }
@@ -165,16 +159,15 @@ pub fn coverToParenthesizedExpression(
     );
 }
 
-/// Converts the cover into an `ArrowFunctionExpression`.
-/// Only JavaScript arrows take this path, since TypeScript arrows go through `parseArrow`.
+/// Converts the cover into a non-async `ArrowFunctionExpression`.
+/// Async and TypeScript arrows go through `parseArrow` instead.
 pub fn coverToArrowFunction(
     parser: *Parser,
     cover: ParenthesizedCover,
-    is_async: bool,
     arrow_start: u32,
 ) Error!?ast.NodeIndex {
     const params = try convertToFormalParameters(parser, cover) orelse return null;
-    return buildArrowFunction(parser, params, is_async, arrow_start, .null, .null);
+    return buildArrowFunction(parser, params, false, arrow_start, .null, .null);
 }
 
 /// Converts a lone identifier into an arrow function for `x => body`.
@@ -185,10 +178,9 @@ pub fn identifierToArrowFunction(
     start: u32,
 ) Error!?ast.NodeIndex {
     const param = try convertToFormalParameter(parser, id);
-    const items = try parser.tree.addExtra(&.{param});
     const params = try parser.tree.addNode(
         .{ .formal_parameters = .{
-            .items = items,
+            .items = try parser.tree.addExtra(&.{param}),
             .rest = .null,
             .kind = .arrow_formal_parameters,
         } },
@@ -236,10 +228,8 @@ const ArrowBodyResult = struct {
 };
 
 fn parseArrowBody(parser: *Parser) Error!?ArrowBodyResult {
-    if (parser.current_token.tag == .left_brace) {
-        const body = try functions.parseFunctionBody(parser) orelse return null;
-        return .{ .body = body, .is_expression = false };
-    }
+    const body = try functions.parseFunctionBody(parser, .optional) orelse return null;
+    if (body != .null) return .{ .body = body, .is_expression = false };
 
     const expr = try expressions.parseExpression(
         parser,
@@ -255,16 +245,13 @@ fn convertToFormalParameters(parser: *Parser, cover: ParenthesizedCover) Error!?
     defer parser.scratch_cover.reset(checkpoint);
 
     var rest: ast.NodeIndex = .null;
-
-    const elements = parser.tree.extra(cover.elements);
-    for (elements) |elem| {
+    for (parser.tree.extra(cover.elements)) |elem| {
         if (rest != .null) {
             try parser.report(
                 parser.tree.span(rest),
                 "Rest parameter must be last formal parameter",
                 .{ .help = "Move the rest parameter to the end of the parameter list" },
             );
-
             return null;
         }
 
@@ -285,15 +272,12 @@ fn convertToFormalParameters(parser: *Parser, cover: ParenthesizedCover) Error!?
         }
 
         const param = try convertToFormalParameter(parser, elem);
-
         try parser.scratch_cover.append(parser.allocator(), param);
     }
 
-    const items = try parser.flushToExtras(&parser.scratch_cover, checkpoint);
-
     return try parser.tree.addNode(
         .{ .formal_parameters = .{
-            .items = items,
+            .items = try parser.flushToExtras(&parser.scratch_cover, checkpoint),
             .rest = rest,
             .kind = .arrow_formal_parameters,
         } },

@@ -248,7 +248,7 @@ How this repository works. The runtime it ships to, where its tests go, how a ch
 ### Runtime Baseline
 
 - Shipped JavaScript runs on **one floor**: ECMAScript 2020, on the runtime version in the root `package.json` `engines.node`. Tools downstream support older runtimes than we might, and a newer syntax or built-in breaks them silently. Every package declares that same floor, and CI runs the packages on exactly that version.
-- The WebAssembly build also needs WebAssembly SIMD and reference types, which `@yuku-core/wasm` declares as its own, higher floor.
+- The packages run Yuku as WebAssembly, which needs WebAssembly SIMD, so the floor is a runtime that has it.
 - **Raising the floor is a breaking change.** Change the root `engines.node` on purpose, let every package follow it, and say so in the release notes. Never raise it implicitly by reaching for a newer feature.
 
 ### Testing
@@ -266,7 +266,7 @@ Test at the layer that changed, in the form that layer already uses. Every layer
 | Resolution as tsc or scope-manager defines it | A snippet in `test/analyzer/tsc-differential.test.ts` or `scope-manager-differential.test.ts` |
 | A real codebase to analyze | An entry in `test/projects/manifest.ts`, pinned to a commit |
 | AST helpers and walkers | `test/ast/` |
-| The wasm packages | `test/wasm/`, as smoke tests only |
+| The dialect mechanism | `src/parser/testing/dialect.zig`, a dialect that claims every position, and `test/dialect/` for its JavaScript side |
 | Zig internals the JS API cannot reach (traverser, scopes, walk order, allocation failure) | `src/parser/testing/cases/` |
 | A small pure Zig helper | An inline `test` block next to the function |
 
@@ -286,7 +286,7 @@ Test at the layer that changed, in the form that layer already uses. Every layer
 - **Written for people, not copied from commits.** A line tells a user what they will notice, in plain words and sentence case, the way a person would describe it to another. Never a commit subject, never an area prefix. Commits behind one visible change share a line, which ends with its pull requests and authors when it has them: `- TypeScript declarations can now break across lines wherever TypeScript allows it (#218 by @author)`.
 - **Short, never an essay.** A line names the change, and a breaking one says what to do instead. Context, rationale, and internals belong in the commit.
 - **Breaking changes come first.** When a release has any, they go under `### Breaking`, each saying what a user must change, and the rest under `### Changes`.
-- **Commit the notes, then bump.** `bun run release:npm` commits only the new versions, then tags and pushes. The publish workflow stops before building when `CHANGELOG.md` has no section for the tag, and posts that section as the GitHub release once the packages are on npm.
+- **Commit the notes, then bump.** `bun run release:npm <version>` commits only the new versions, then tags and pushes. The publish workflow stops before building when `CHANGELOG.md` has no section for the tag, and posts that section as the GitHub release once the packages are on npm.
 
 ---
 

@@ -6,11 +6,6 @@ pub const String = struct {
     end: u32 = 0,
 
     pub const empty: String = .{};
-
-    pub fn len(self: String) u32 {
-        std.debug.assert(self.end >= self.start);
-        return self.end - self.start;
-    }
 };
 
 pub const ASTStringPool = struct {
@@ -29,7 +24,7 @@ pub const ASTStringPool = struct {
             std.debug.assert(id.end <= src_len);
             return self.source[id.start..id.end];
         }
-        return self.extra.items[id.start - src_len .. id.end - src_len];
+        return resolve(self.extra.items, src_len, id);
     }
 
     /// Returns a `String` referencing a range in the original source.
@@ -37,19 +32,6 @@ pub const ASTStringPool = struct {
         std.debug.assert(start <= end);
         std.debug.assert(end <= self.source.len);
         return .{ .start = start, .end = end };
-    }
-
-    pub fn ensureUnusedCapacity(
-        self: *ASTStringPool,
-        alloc: std.mem.Allocator,
-        bytes: u32,
-        entries: u32,
-    ) error{OutOfMemory}!void {
-        try self.extra.ensureUnusedCapacity(alloc, bytes);
-        try self.dedup.ensureUnusedCapacityContext(alloc, entries, MapCtx{
-            .extra = self.extra.items,
-            .src_len = @intCast(self.source.len),
-        });
     }
 
     /// Interns a string into the extra buffer with deduplication.

@@ -19,6 +19,10 @@ function tags(tokens: TokenList): string[] {
   return Array.from({ length: tokens.length }, (_, i) => names.get(tokens.kind(i))!);
 }
 
+function spans(tokens: TokenList): number[][] {
+  return Array.from({ length: tokens.length }, (_, i) => [tokens.start(i), tokens.end(i)]);
+}
+
 describe("tokens", () => {
   test("absent unless requested", () => {
     expect(parse("let x = 1;").tokens).toBeUndefined();
@@ -86,8 +90,9 @@ describe("tokens", () => {
   test("lone surrogates keep every span in UTF-16", () => {
     const source = `const s = "\uD800\uD800"; after;`;
     const { program, tokens } = parse(source, { tokens: true });
-    const spans = Array.from({ length: tokens!.length }, (_, i) => [tokens!.start(i), tokens!.end(i)]);
-    expect(spans).toEqual([[0, 5], [6, 7], [8, 9], [10, 14], [14, 15], [16, 21], [21, 22]]);
+    expect(spans(tokens!)).toEqual([
+      [0, 5], [6, 7], [8, 9], [10, 14], [14, 15], [16, 21], [21, 22],
+    ]);
     expect(program.body[1]).toMatchObject({ start: 16, end: 22 });
   });
 

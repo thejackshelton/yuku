@@ -11,16 +11,13 @@ const ScopeId = parser.traverser.semantic.ScopeId;
 const Symbol = parser.traverser.semantic.Symbol;
 const Reference = parser.traverser.semantic.Reference;
 
-const InvariantChecker = struct {
-    pub fn check(self: InvariantChecker, path: []const u8, tree: *ast.Tree) !void {
-        _ = self;
-        const sem = try semantic.analyze(tree);
-        verify(tree, &sem) catch |err| {
-            std.debug.print("{s}: semantic invariant violated: {t}\n", .{ path, err });
-            return err;
-        };
-    }
-};
+fn checkInvariants(path: []const u8, tree: *ast.Tree) !void {
+    const sem = try semantic.analyze(tree);
+    verify(tree, &sem) catch |err| {
+        std.debug.print("{s}: semantic invariant violated: {t}\n", .{ path, err });
+        return err;
+    };
+}
 
 fn verify(tree: *const ast.Tree, sem: *const Semantic) !void {
     try verifyScopes(tree, sem);
@@ -169,5 +166,5 @@ fn verifyNodeTables(tree: *const ast.Tree, sem: *const Semantic) !void {
 }
 
 test "semantic model invariants hold across the parser corpus" {
-    try helpers.forEachCorpusTree(std.testing.allocator, InvariantChecker{});
+    try helpers.forEachCorpusTree(checkInvariants);
 }

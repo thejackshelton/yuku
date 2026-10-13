@@ -1,9 +1,6 @@
 name: Scorecard
 
-# OpenSSF Scorecard grades the repo's security posture (branch protection,
-# pinned actions, token permissions, dangerous workflow patterns, and more)
-# and uploads findings to the Security tab. publish_results powers the public
-# score badge.
+# grades the repository's security posture into the Security tab and the public badge
 
 on:
   branch_protection_rule:

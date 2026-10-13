@@ -15,8 +15,7 @@ docs/public/
 test/**/suite
 test/projects/*/
 zig-pkg
-yuku-*.*
-.node
+*.wasm
 typescript
 
 !playground/dist/**

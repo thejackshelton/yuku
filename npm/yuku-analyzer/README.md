@@ -1,6 +1,6 @@
 # yuku-analyzer
 
-Scopes, bindings, resolved references, closures, and cross-file linking for JavaScript and TypeScript, computed natively, part of [Yuku](https://yuku.fyi).
+Scopes, bindings, resolved references, closures, and cross-file linking for JavaScript and TypeScript, computed in Zig, part of [Yuku](https://yuku.fyi).
 
 Getting the same answers otherwise takes a stack of tools, each parsing every file again into its own tree:
 
@@ -31,7 +31,7 @@ It is as accurate as it is fast. [Read how it is tested →](https://yuku.fyi/te
 npm install yuku-analyzer
 ```
 
-It runs on Yuku's native core, installed for your platform. In browsers and edge runtimes, load the WebAssembly core from [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm) and pass it in, with `new Analyzer({ core })` or `analyze(source, { core })`.
+It runs the WebAssembly build of Yuku that [`yuku-parser`](https://www.npmjs.com/package/yuku-parser) ships, in Node.js, Bun, Deno, browsers, and edge runtimes. A browser awaits `ready` once before the first analysis. A language built on Yuku passes its own build as `wasm`, with `new Analyzer({ wasm })` or `analyze(source, { wasm })`.
 
 ## Usage
 
@@ -72,7 +72,7 @@ project.diagnostics;                    // every module's diagnostics, and the f
 project.link();                         // links now, cross-file queries link on demand otherwise
 ```
 
-The options are `lang` and `sourceType`, inferred from the path, and `preserveParens`, `attachComments`, and `tokens`, as in [`yuku-parser`](https://www.npmjs.com/package/yuku-parser#options). `analyze(source, options)` is a project of one file, with `path` among its options.
+The options are `lang` and `sourceType`, inferred from the path, and `preserveParens`, `attachComments`, `tokens`, and `dialect`, as in [`yuku-parser`](https://www.npmjs.com/package/yuku-parser#options). `analyze(source, options)` is a project of one file, with `path` among its options.
 
 The default resolver matches relative specifiers to files in the project, probing extensions and index files as TypeScript does, so `./a.js` finds `a.ts`. A package or an asset such as `./app.css` is external, and a relative specifier with no match is reported.
 

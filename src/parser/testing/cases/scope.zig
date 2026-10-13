@@ -7,12 +7,8 @@ const ScopeId = parser.traverser.scoped.ScopeId;
 
 const testing = std.testing;
 
-fn analyze(source: []const u8, opts: parser.Options) !helpers.Analyzed {
-    return helpers.analyze(testing.allocator, source, opts);
-}
-
 test "scope ancestors walk from a scope to the root" {
-    var a = try analyze("function f() { { let x; } }", .{});
+    var a = try helpers.analyze("function f() { { let x; } }", .{});
     defer a.deinit();
 
     const x_scope_id = (try a.symbolNamed("x")).symbol.scope;
@@ -30,7 +26,7 @@ test "scope ancestors walk from a scope to the root" {
 }
 
 test "scopeOf maps scope-creating nodes to the scope they create" {
-    var a = try analyze("function f() {}", .{});
+    var a = try helpers.analyze("function f() {}", .{});
     defer a.deinit();
 
     const func_node = try a.firstNode(.function);
@@ -55,7 +51,7 @@ test "Scope.Kind.isHoistTarget matches the spec hoist boundaries" {
 
 test "nesting deeper than the path capacity analyzes without a parent" {
     const source = helpers.repeat("typeof ", 300) ++ "function f() { switch (a) { case 1: b } }";
-    var result = try helpers.analyzeAllowErrors(testing.allocator, source, .{});
+    var result = try helpers.analyzeAllowErrors(source, .{});
     defer result.deinit();
     try testing.expect(result.sem.scopes.list.len >= 2);
 }

@@ -17,17 +17,17 @@ pub const Mask = struct {
 
 pub const TokenTag = enum(u32) {
     // literals
-    numeric_literal = 1 | Mask.IsNumericLiteral, // e.g., "123", "45.67"
-    hex_literal = 2 | Mask.IsNumericLiteral, // e.g., "0xFF", "0x1A"
-    octal_literal = 3 | Mask.IsNumericLiteral, // e.g., "0o777", "0o12"
-    binary_literal = 4 | Mask.IsNumericLiteral, // e.g., "0b1010", "0b11"
-    bigint_literal = 5 | Mask.IsNumericLiteral, // e.g., "123n", "456n"
-    string_literal = 6, // e.g., "'hello'", "\"world\""
-    regex_literal = 7, // e.g., "/abc/g", "/[0-9]+/i"
-    no_substitution_template = 8 | (17 << Mask.PrecShift), // e.g., "`hello`"
-    template_head = 9 | (17 << Mask.PrecShift), // e.g., "`hello ${"
-    template_middle = 10, // e.g., "} world ${"
-    template_tail = 11, // e.g., "} end`"
+    numeric_literal = 1 | Mask.IsNumericLiteral,
+    hex_literal = 2 | Mask.IsNumericLiteral,
+    octal_literal = 3 | Mask.IsNumericLiteral,
+    binary_literal = 4 | Mask.IsNumericLiteral,
+    bigint_literal = 5 | Mask.IsNumericLiteral,
+    string_literal = 6,
+    regex_literal = 7,
+    no_substitution_template = 8 | (17 << Mask.PrecShift),
+    template_head = 9 | (17 << Mask.PrecShift),
+    template_middle = 10,
+    template_tail = 11,
 
     // keyword literals
     true = 12 | Mask.IsKeyword | Mask.IsUnconditionallyReserved | Mask.IsIdentifierLike,
@@ -35,80 +35,80 @@ pub const TokenTag = enum(u32) {
     null_literal = 14 | Mask.IsKeyword | Mask.IsUnconditionallyReserved | Mask.IsIdentifierLike,
 
     // arithmetic operators
-    plus = 15 | (11 << Mask.PrecShift) | Mask.IsBinaryOp | Mask.IsUnaryOp, // "+"
-    minus = 16 | (11 << Mask.PrecShift) | Mask.IsBinaryOp | Mask.IsUnaryOp, // "-"
-    star = 17 | (12 << Mask.PrecShift) | Mask.IsBinaryOp, // "*"
-    slash = 18 | (12 << Mask.PrecShift) | Mask.IsBinaryOp, // "/"
-    percent = 19 | (12 << Mask.PrecShift) | Mask.IsBinaryOp, // "%"
-    exponent = 20 | (13 << Mask.PrecShift) | Mask.IsBinaryOp, // "**"
+    plus = 15 | (11 << Mask.PrecShift) | Mask.IsBinaryOp | Mask.IsUnaryOp,
+    minus = 16 | (11 << Mask.PrecShift) | Mask.IsBinaryOp | Mask.IsUnaryOp,
+    star = 17 | (12 << Mask.PrecShift) | Mask.IsBinaryOp,
+    slash = 18 | (12 << Mask.PrecShift) | Mask.IsBinaryOp,
+    percent = 19 | (12 << Mask.PrecShift) | Mask.IsBinaryOp,
+    exponent = 20 | (13 << Mask.PrecShift) | Mask.IsBinaryOp,
 
     // assignment operators
-    assign = 21 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "="
-    plus_assign = 22 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "+="
-    minus_assign = 23 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "-="
-    star_assign = 24 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "*="
-    slash_assign = 25 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "/="
-    percent_assign = 26 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "%="
-    exponent_assign = 27 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "**="
+    assign = 21 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    plus_assign = 22 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    minus_assign = 23 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    star_assign = 24 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    slash_assign = 25 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    percent_assign = 26 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    exponent_assign = 27 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
 
     // update operators
-    increment = 28 | (15 << Mask.PrecShift), // "++"
-    decrement = 29 | (15 << Mask.PrecShift), // "--"
+    increment = 28 | (15 << Mask.PrecShift),
+    decrement = 29 | (15 << Mask.PrecShift),
 
     // equality and relational operators
-    equal = 30 | (8 << Mask.PrecShift) | Mask.IsBinaryOp, // "=="
-    not_equal = 31 | (8 << Mask.PrecShift) | Mask.IsBinaryOp, // "!="
-    strict_equal = 32 | (8 << Mask.PrecShift) | Mask.IsBinaryOp, // "==="
-    strict_not_equal = 33 | (8 << Mask.PrecShift) | Mask.IsBinaryOp, // "!=="
-    less_than = 34 | (9 << Mask.PrecShift) | Mask.IsBinaryOp, // "<"
-    greater_than = 35 | (9 << Mask.PrecShift) | Mask.IsBinaryOp, // ">"
-    less_than_equal = 36 | (9 << Mask.PrecShift) | Mask.IsBinaryOp, // "<="
-    greater_than_equal = 37 | (9 << Mask.PrecShift) | Mask.IsBinaryOp, // ">="
+    equal = 30 | (8 << Mask.PrecShift) | Mask.IsBinaryOp,
+    not_equal = 31 | (8 << Mask.PrecShift) | Mask.IsBinaryOp,
+    strict_equal = 32 | (8 << Mask.PrecShift) | Mask.IsBinaryOp,
+    strict_not_equal = 33 | (8 << Mask.PrecShift) | Mask.IsBinaryOp,
+    less_than = 34 | (9 << Mask.PrecShift) | Mask.IsBinaryOp,
+    greater_than = 35 | (9 << Mask.PrecShift) | Mask.IsBinaryOp,
+    less_than_equal = 36 | (9 << Mask.PrecShift) | Mask.IsBinaryOp,
+    greater_than_equal = 37 | (9 << Mask.PrecShift) | Mask.IsBinaryOp,
 
     // logical operators
-    logical_and = 38 | (4 << Mask.PrecShift) | Mask.IsLogicalOp, // "&&"
-    logical_or = 39 | (3 << Mask.PrecShift) | Mask.IsLogicalOp, // "||"
-    logical_not = 40 | (14 << Mask.PrecShift) | Mask.IsUnaryOp, // "!"
+    logical_and = 38 | (4 << Mask.PrecShift) | Mask.IsLogicalOp,
+    logical_or = 39 | (3 << Mask.PrecShift) | Mask.IsLogicalOp,
+    logical_not = 40 | (14 << Mask.PrecShift) | Mask.IsUnaryOp,
 
     // bitwise operators
-    bitwise_and = 41 | (7 << Mask.PrecShift) | Mask.IsBinaryOp, // "&"
-    bitwise_or = 42 | (5 << Mask.PrecShift) | Mask.IsBinaryOp, // "|"
-    bitwise_xor = 43 | (6 << Mask.PrecShift) | Mask.IsBinaryOp, // "^"
-    bitwise_not = 44 | Mask.IsUnaryOp, // "~"
-    left_shift = 45 | (10 << Mask.PrecShift) | Mask.IsBinaryOp, // "<<"
-    right_shift = 46 | (10 << Mask.PrecShift) | Mask.IsBinaryOp, // ">>"
-    unsigned_right_shift = 47 | (10 << Mask.PrecShift) | Mask.IsBinaryOp, // ">>>"
+    bitwise_and = 41 | (7 << Mask.PrecShift) | Mask.IsBinaryOp,
+    bitwise_or = 42 | (5 << Mask.PrecShift) | Mask.IsBinaryOp,
+    bitwise_xor = 43 | (6 << Mask.PrecShift) | Mask.IsBinaryOp,
+    bitwise_not = 44 | Mask.IsUnaryOp,
+    left_shift = 45 | (10 << Mask.PrecShift) | Mask.IsBinaryOp,
+    right_shift = 46 | (10 << Mask.PrecShift) | Mask.IsBinaryOp,
+    unsigned_right_shift = 47 | (10 << Mask.PrecShift) | Mask.IsBinaryOp,
 
     // compound bitwise assignment
-    bitwise_and_assign = 48 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "&="
-    bitwise_or_assign = 49 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "|="
-    bitwise_xor_assign = 50 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "^="
-    left_shift_assign = 51 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "<<="
-    right_shift_assign = 52 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // ">>="
-    unsigned_right_shift_assign = 53 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // ">>>="
+    bitwise_and_assign = 48 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    bitwise_or_assign = 49 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    bitwise_xor_assign = 50 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    left_shift_assign = 51 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    right_shift_assign = 52 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    unsigned_right_shift_assign = 53 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
 
     // nullish and optional
-    nullish_coalescing = 54 | (3 << Mask.PrecShift) | Mask.IsLogicalOp, // "??"
-    nullish_assign = 55 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "??="
-    logical_and_assign = 56 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "&&="
-    logical_or_assign = 57 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp, // "||="
-    optional_chaining = 58 | (17 << Mask.PrecShift), // "?."
+    nullish_coalescing = 54 | (3 << Mask.PrecShift) | Mask.IsLogicalOp,
+    nullish_assign = 55 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    logical_and_assign = 56 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    logical_or_assign = 57 | (2 << Mask.PrecShift) | Mask.IsAssignmentOp,
+    optional_chaining = 58 | (17 << Mask.PrecShift),
 
     // punctuation
-    left_paren = 59 | (17 << Mask.PrecShift), // "("
-    right_paren = 60, // ")"
-    left_brace = 61, // "{"
-    right_brace = 62, // "}"
-    left_bracket = 63 | (17 << Mask.PrecShift), // "["
-    right_bracket = 64, // "]"
-    semicolon = 65, // ";"
-    comma = 66 | (1 << Mask.PrecShift), // ","
-    dot = 67 | (17 << Mask.PrecShift), // "."
-    spread = 68, // "..."
-    arrow = 69 | (2 << Mask.PrecShift), // "=>"
-    question = 70 | (2 << Mask.PrecShift), // "?"
-    colon = 71, // ":"
-    at = 72, // "@"
+    left_paren = 59 | (17 << Mask.PrecShift),
+    right_paren = 60,
+    left_brace = 61,
+    right_brace = 62,
+    left_bracket = 63 | (17 << Mask.PrecShift),
+    right_bracket = 64,
+    semicolon = 65,
+    comma = 66 | (1 << Mask.PrecShift),
+    dot = 67 | (17 << Mask.PrecShift),
+    spread = 68,
+    arrow = 69 | (2 << Mask.PrecShift),
+    question = 70 | (2 << Mask.PrecShift),
+    colon = 71,
+    at = 72,
 
     // reserved keywords
     @"if" = 73 | Mask.IsKeyword | Mask.IsUnconditionallyReserved | Mask.IsIdentifierLike,
@@ -220,15 +220,15 @@ pub const TokenTag = enum(u32) {
     jsx_text = 158,
 
     eof = 159,
-    /// Input the lexer could not tokenize during lookahead. Matches no production, so a
-    /// disambiguation that sees it falls through to the real parse path.
+    /// Input the lexer could not scan during lookahead. It matches no production, so a
+    /// disambiguation that sees it falls through to the real parse.
     invalid = 160,
 
     pub fn precedence(self: TokenTag) u5 {
         return @intCast((@backingInt(self) >> Mask.PrecShift) & Mask.PrecOverlap);
     }
 
-    pub fn hasMask(self: TokenTag, mask: u32) bool {
+    fn hasMask(self: TokenTag, mask: u32) bool {
         return (@backingInt(self) & mask) != 0;
     }
 
@@ -266,22 +266,19 @@ pub const TokenTag = enum(u32) {
         return self.hasMask(Mask.IsUnconditionallyReserved);
     }
 
-    /// Whether the token is a keyword reserved only in strict mode.
-    pub fn isStrictModeReserved(self: TokenTag) bool {
-        return self.hasMask(Mask.IsStrictModeReserved);
-    }
-
     /// Whether the token is reserved unconditionally or in strict mode.
     pub fn isReserved(self: TokenTag) bool {
         return self.hasMask(Mask.IsUnconditionallyReserved | Mask.IsStrictModeReserved);
     }
 
     pub fn toString(self: TokenTag) ?[]const u8 {
-        return switch (self) {
-            .true => "true",
-            .false => "false",
+        // a keyword is spelled as its tag name, except `null`
+        if (self.isIdentifierLike()) return switch (self) {
+            .identifier => null,
             .null_literal => "null",
-
+            else => @tagName(self),
+        };
+        return switch (self) {
             .plus => "+",
             .minus => "-",
             .star => "*",
@@ -349,99 +346,6 @@ pub const TokenTag = enum(u32) {
             .colon => ":",
             .at => "@",
 
-            .@"if" => "if",
-            .@"else" => "else",
-            .@"switch" => "switch",
-            .case => "case",
-            .default => "default",
-            .@"for" => "for",
-            .@"while" => "while",
-            .do => "do",
-            .@"break" => "break",
-            .@"continue" => "continue",
-
-            .function => "function",
-            .@"return" => "return",
-            .async => "async",
-            .await => "await",
-            .yield => "yield",
-
-            .@"var" => "var",
-            .let => "let",
-            .@"const" => "const",
-            .using => "using",
-
-            .class => "class",
-            .extends => "extends",
-            .super => "super",
-            .static => "static",
-            .@"enum" => "enum",
-            .public => "public",
-            .private => "private",
-            .protected => "protected",
-            .interface => "interface",
-            .implements => "implements",
-            .package => "package",
-
-            .import => "import",
-            .@"export" => "export",
-            .from => "from",
-            .as => "as",
-            .namespace => "namespace",
-            .assert => "assert",
-            .source => "source",
-            .@"defer" => "defer",
-
-            .@"try" => "try",
-            .@"catch" => "catch",
-            .finally => "finally",
-            .throw => "throw",
-
-            .new => "new",
-            .this => "this",
-            .typeof => "typeof",
-            .instanceof => "instanceof",
-            .in => "in",
-            .of => "of",
-            .delete => "delete",
-            .void => "void",
-            .with => "with",
-            .debugger => "debugger",
-
-            .declare => "declare",
-
-            .get => "get",
-            .set => "set",
-            .accessor => "accessor",
-            .constructor => "constructor",
-
-            .type => "type",
-            .abstract => "abstract",
-            .override => "override",
-            .readonly => "readonly",
-            .keyof => "keyof",
-            .unique => "unique",
-            .infer => "infer",
-            .out => "out",
-            .asserts => "asserts",
-            .satisfies => "satisfies",
-            .intrinsic => "intrinsic",
-            .is => "is",
-            .global => "global",
-            .module => "module",
-            .require => "require",
-
-            .any => "any",
-            .bigint => "bigint",
-            .boolean => "boolean",
-            .never => "never",
-            .number => "number",
-            .object => "object",
-            .string => "string",
-            .symbol => "symbol",
-            .undefined => "undefined",
-            .unknown => "unknown",
-
             .eof,
             .invalid,
             .numeric_literal,
@@ -455,11 +359,12 @@ pub const TokenTag = enum(u32) {
             .template_head,
             .template_middle,
             .template_tail,
-            .identifier,
             .private_identifier,
             .jsx_identifier,
             .jsx_text,
             => null,
+
+            else => unreachable,
         };
     }
 };
@@ -552,4 +457,6 @@ pub const Precedence = struct {
 
 comptime {
     std.debug.assert(@sizeOf(Token) == 16);
+    // a tag missing from `toString` hits its `unreachable` here
+    for (std.enums.values(TokenTag)) |tag| _ = tag.toString();
 }

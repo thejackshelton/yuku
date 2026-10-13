@@ -13,16 +13,13 @@ import type {
   TSSatisfiesExpression,
   TSTypeAssertion,
 } from "@yuku-toolchain/types";
-import { is } from "./is.js";
+import { is, type MaybeNode } from "./is.js";
 import { walk } from "./walk.js";
-
-type MaybeNode = Node | null | undefined;
 
 /**
  * The static name a node denotes: an `Identifier`'s `name` or a string
- * `Literal`'s `value`. Null for anything else, so the common
- * `Identifier | StringLiteral` name slots (a `ModuleExportName`, a
- * static property key) read in one call.
+ * `Literal`'s `value`, as in a `ModuleExportName` or a static property
+ * key. Null for anything else.
  */
 export function nameOf(node: Identifier | StringLiteral): string;
 export function nameOf(node: MaybeNode): string | null;
@@ -66,9 +63,8 @@ const WRAPPERS = new Set<NodeType>([
 ]);
 
 /**
- * True when `node` is a {@link Wrapper}, the expressions {@link unwrap}
- * strips to reach the one that carries the meaning. Its `expression` is
- * the node underneath.
+ * True when `node` is a {@link Wrapper}, whose `expression` is the
+ * wrapped node.
  *
  * @example
  * isWrapper(node) ? node.expression : node
@@ -89,15 +85,17 @@ export function unwrap(node: Expression): Expression {
 }
 
 /**
- * True when `node` is a call whose callee is an `Identifier` named
- * `name`, one of `name` when given an array. The callee is read
- * through {@link unwrap}.
+ * True when `node` calls an `Identifier` named `name`, or any of
+ * `name` when given an array. The callee is read through {@link unwrap}.
  *
  * @example
  * isCallOf(node, "require")
  * isCallOf(node, ["defineConfig", "defineProject"])
  */
-export function isCallOf(node: MaybeNode, name: string | readonly string[]): node is CallExpression {
+export function isCallOf(
+  node: MaybeNode,
+  name: string | readonly string[],
+): node is CallExpression {
   if (node?.type !== "CallExpression") return false;
   const callee = unwrap(node.callee);
   if (callee.type !== "Identifier") return false;
@@ -130,8 +128,6 @@ export function bindingIdentifiers(pattern: BindingPattern | null | undefined): 
         break;
       case "RestElement":
         visit(node.argument);
-        break;
-      default:
         break;
     }
   };

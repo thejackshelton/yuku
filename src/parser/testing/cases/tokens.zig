@@ -5,35 +5,32 @@ const helpers = @import("../helpers.zig");
 const ast = parser.ast;
 const Token = ast.Token;
 
-const AlignmentChecker = struct {
-    pub fn check(self: AlignmentChecker, path: []const u8, tree: *ast.Tree) !void {
-        _ = self;
-        var with_tokens = try parser.parse(std.testing.allocator, tree.source, .{
-            .lang = tree.lang,
-            .source_type = tree.source_type,
-            .tokens = true,
-        });
-        defer with_tokens.deinit();
+fn checkAlignment(path: []const u8, tree: *const ast.Tree) !void {
+    var with_tokens = try parser.parse(std.testing.allocator, tree.source, .{
+        .lang = tree.lang,
+        .source_type = tree.source_type,
+        .tokens = true,
+    });
+    defer with_tokens.deinit();
 
-        const tokens = with_tokens.tokens;
-        var i: u32 = 0;
-        while (i < with_tokens.nodes.len) : (i += 1) {
-            const index: ast.NodeIndex = @fromBackingInt(i);
-            switch (with_tokens.data(index)) {
-                // the program starts before leading trivia, the other two sit inside one token
-                .program, .template_element, .jsx_empty_expression => continue,
-                else => {},
-            }
-            const span = with_tokens.span(index);
-            if (!boundary(tokens, .start, span.start) or !boundary(tokens, .end, span.end)) {
-                std.debug.print("{s}: {t} at {d}..{d} is not token aligned\n", .{
-                    path, with_tokens.data(index), span.start, span.end,
-                });
-                return error.NodeNotTokenAligned;
-            }
+    const tokens = with_tokens.tokens;
+    var i: u32 = 0;
+    while (i < with_tokens.nodes.len) : (i += 1) {
+        const index: ast.NodeIndex = @fromBackingInt(i);
+        switch (with_tokens.data(index)) {
+            // the program starts before leading trivia, the other two sit inside one token
+            .program, .template_element, .jsx_empty_expression => continue,
+            else => {},
+        }
+        const span = with_tokens.span(index);
+        if (!boundary(tokens, .start, span.start) or !boundary(tokens, .end, span.end)) {
+            std.debug.print("{s}: {t} at {d}..{d} is not token aligned\n", .{
+                path, with_tokens.data(index), span.start, span.end,
+            });
+            return error.NodeNotTokenAligned;
         }
     }
-};
+}
 
 fn boundary(tokens: []const Token, comptime edge: enum { start, end }, offset: u32) bool {
     var lo: usize = 0;
@@ -46,5 +43,5 @@ fn boundary(tokens: []const Token, comptime edge: enum { start, end }, offset: u
 }
 
 test "node spans align to token boundaries across the parser corpus" {
-    try helpers.forEachCorpusTree(std.testing.allocator, AlignmentChecker{});
+    try helpers.forEachCorpusTree(checkAlignment);
 }

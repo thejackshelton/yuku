@@ -161,8 +161,6 @@ fn parsePostfixType(parser: *Parser) Error!?ast.NodeIndex {
     return ty;
 }
 
-// T[]   T[K]
-// ^^^   ^^^^
 fn parseArrayOrIndexedAccessType(parser: *Parser, element: ast.NodeIndex) Error!?ast.NodeIndex {
     const start = parser.tree.span(element).start;
     try parser.advance() orelse return null;
@@ -190,8 +188,6 @@ fn parseArrayOrIndexedAccessType(parser: *Parser, element: ast.NodeIndex) Error!
     );
 }
 
-// T?   T!
-// ^^   ^^
 fn parseJSDocPostfix(
     parser: *Parser,
     inner: ast.NodeIndex,
@@ -208,8 +204,7 @@ fn parseJSDocPostfix(
 
 // a postfix `?` only when no type follows, else the outer conditional owns it
 fn isPostfixNullable(parser: *Parser) bool {
-    const next = parser.peekAhead();
-    return !isStartOfType(next.tag);
+    return !isStartOfType(parser.peekAhead().tag);
 }
 
 // string   42   Foo<T>   this is T   asserts x is T
@@ -285,8 +280,6 @@ fn isQualifiedTypeContinuation(parser: *Parser) bool {
     return next.tag == .dot and !next.hasLineTerminatorBefore();
 }
 
-// string   number   void
-// ^^^^^^   ^^^^^^   ^^^^
 inline fn parseTypeKeyword(parser: *Parser) Error!?ast.NodeIndex {
     const token = parser.current_token;
 
@@ -307,7 +300,6 @@ inline fn parseTypeKeyword(parser: *Parser) Error!?ast.NodeIndex {
     };
 
     try parser.advance() orelse return null;
-
     return try parser.tree.addNode(data, token.span);
 }
 
@@ -345,21 +337,17 @@ fn continuesType(tag: TokenTag) bool {
 fn parseJSDocNullableOrUnknownType(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .question);
 
-    const start = parser.current_token.span.start;
-    const q_end = parser.current_token.span.end;
+    const question = parser.current_token.span;
     try parser.advance() orelse return null;
 
     if (!isStartOfType(parser.current_token.tag)) {
-        return try parser.tree.addNode(
-            .{ .ts_jsdoc_unknown_type = .{} },
-            .{ .start = start, .end = q_end },
-        );
+        return try parser.tree.addNode(.{ .ts_jsdoc_unknown_type = .{} }, question);
     }
 
     const inner = try parseType(parser) orelse return null;
     return try parser.tree.addNode(
         jsdocNodeData(inner, .nullable, false),
-        .{ .start = start, .end = parser.tree.span(inner).end },
+        .{ .start = question.start, .end = parser.tree.span(inner).end },
     );
 }
 
@@ -535,30 +523,18 @@ fn isStartOfFunctionOrConstructorType(parser: *Parser) Error!bool {
 
     if (tag == .new) return true;
 
-    if (tag == .abstract) {
-        const next = parser.peekAhead();
-        return next.tag == .new;
-    }
-
+    if (tag == .abstract) return parser.peekAhead().tag == .new;
     if (generics.isAngleOpen(tag)) return true;
-
     if (tag != .left_paren) return false;
 
     var peek = parser.beginPeek();
     defer peek.end();
 
-    const t1 = peek.next();
-
-    switch (t1.tag) {
-        .right_paren => {
-            const t2 = peek.next();
-            return t2.tag == .arrow;
-        },
+    const first = peek.next();
+    switch (first.tag) {
+        .right_paren => return peek.next().tag == .arrow,
         .spread => return true,
-        .this => {
-            const t2 = peek.next();
-            return t2.tag == .colon;
-        },
+        .this => return peek.next().tag == .colon,
         // `{` or `[` may head a parameter pattern or a type
         .left_brace, .left_bracket => {
             peek.end();
@@ -567,16 +543,11 @@ fn isStartOfFunctionOrConstructorType(parser: *Parser) Error!bool {
         else => {},
     }
 
-    if (!t1.tag.isIdentifierLike()) return false;
+    if (!first.tag.isIdentifierLike()) return false;
 
-    const t2 = peek.next();
-
-    return switch (t2.tag) {
+    return switch (peek.next().tag) {
         .colon, .question, .comma, .assign => true,
-        .right_paren => blk: {
-            const t3 = peek.next();
-            break :blk t3.tag == .arrow;
-        },
+        .right_paren => peek.next().tag == .arrow,
         else => false,
     };
 }
@@ -586,7 +557,6 @@ fn isFunctionTypeAfterPattern(parser: *Parser) Error!bool {
     defer parser.rewind(cp);
 
     try parser.advance() orelse return false;
-
     _ = try patterns.parseBindingPattern(parser) orelse return false;
 
     return switch (parser.current_token.tag) {
@@ -648,8 +618,6 @@ fn parseFunctionOrConstructorType(parser: *Parser) Error!?ast.NodeIndex {
     return try parser.tree.addNode(data, .{ .start = start, .end = return_type_end });
 }
 
-// (A | B)   (Foo)
-// ^^^^^^^   ^^^^^
 fn parseParenthesizedType(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .left_paren);
 
@@ -685,11 +653,8 @@ fn parseTupleType(parser: *Parser) Error!?ast.NodeIndex {
         const element = try parseTupleElement(parser) orelse return null;
         try parser.scratch_a.append(parser.allocator(), element);
 
-        if (parser.current_token.tag == .comma) {
-            try parser.advance() orelse return null;
-        } else {
-            break;
-        }
+        if (parser.current_token.tag != .comma) break;
+        try parser.advance() orelse return null;
     }
 
     if (!try parser.expect(
@@ -740,10 +705,9 @@ fn parseTupleElement(parser: *Parser) Error!?ast.NodeIndex {
         const start = parser.current_token.span.start;
         try parser.advance() orelse return null;
         const inner = try parseTupleElementBody(parser) orelse return null;
-        const end = parser.tree.span(inner).end;
         return try parser.tree.addNode(
             .{ .ts_rest_type = .{ .type_annotation = inner } },
-            .{ .start = start, .end = end },
+            .{ .start = start, .end = parser.tree.span(inner).end },
         );
     }
 
@@ -757,8 +721,8 @@ fn parseTupleElementBody(parser: *Parser) Error!?ast.NodeIndex {
     const ty = try parseType(parser) orelse return null;
 
     switch (parser.tree.data(ty)) {
-        .ts_jsdoc_nullable_type => |n| if (n.postfix) return try parser.tree.addNode(
-            .{ .ts_optional_type = .{ .type_annotation = n.type_annotation } },
+        .ts_jsdoc_nullable_type => |nullable| if (nullable.postfix) return try parser.tree.addNode(
+            .{ .ts_optional_type = .{ .type_annotation = nullable.type_annotation } },
             parser.tree.span(ty),
         ),
         else => {},
@@ -773,17 +737,12 @@ fn isNamedTupleElement(parser: *Parser) bool {
     var peek = parser.beginPeek();
     defer peek.end();
 
-    const t1 = peek.next();
-
-    if (t1.tag == .colon) return true;
-    if (t1.tag != .question) return false;
-
-    const t2 = peek.next();
-    return t2.tag == .colon;
+    const next = peek.next();
+    if (next.tag == .colon) return true;
+    if (next.tag != .question) return false;
+    return peek.next().tag == .colon;
 }
 
-// label: Type     label?: Type
-// ^^^^^^^^^^^     ^^^^^^^^^^^^
 fn parseNamedTupleMember(parser: *Parser) Error!?ast.NodeIndex {
     const start = parser.current_token.span.start;
     const label = try literals.parseIdentifierName(parser) orelse return null;
@@ -962,10 +921,7 @@ fn parseQualifiedSegment(
         try parser.reportExpected(token.span, message, .{ .help = help });
         return null;
     }
-    const node = try parser.tree.addNode(
-        .{ .identifier_name = .{ .name = try parser.identifierName(token) } },
-        token.span,
-    );
+    const node = try literals.addIdentifierName(parser, token);
     try parser.advanceWithoutEscapeCheck() orelse return null;
     return node;
 }

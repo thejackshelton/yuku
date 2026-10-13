@@ -1,4 +1,4 @@
-// ESTree metadata for the decoder generators, one source so they agree
+// ESTree names and lookup tables for the decoder generator
 
 const std = @import("std");
 const parser = @import("parser");
@@ -56,23 +56,23 @@ pub fn enumTableName(comptime E: type) []const u8 {
     @compileError("no lookup table for enum: " ++ @typeName(E));
 }
 
-// ESTree name overrides where snake to pascal is wrong (ts_jsdoc_ to TSJSDoc)
-const NAME_OVERRIDES = [_]struct { z: []const u8, e: []const u8 }{
-    .{ .z = "function_body", .e = "BlockStatement" },
-    .{ .z = "binding_rest_element", .e = "RestElement" },
-    .{ .z = "object_property", .e = "Property" },
-    .{ .z = "identifier_reference", .e = "Identifier" },
-    .{ .z = "binding_identifier", .e = "Identifier" },
-    .{ .z = "identifier_name", .e = "Identifier" },
-    .{ .z = "label_identifier", .e = "Identifier" },
-    .{ .z = "ts_bigint_keyword", .e = "TSBigIntKeyword" },
-    .{ .z = "ts_jsdoc_nullable_type", .e = "TSJSDocNullableType" },
-    .{ .z = "ts_jsdoc_non_nullable_type", .e = "TSJSDocNonNullableType" },
-    .{ .z = "ts_jsdoc_unknown_type", .e = "TSJSDocUnknownType" },
+// ESTree types that pascal casing gets wrong
+const name_overrides = [_]struct { zig: []const u8, estree: []const u8 }{
+    .{ .zig = "function_body", .estree = "BlockStatement" },
+    .{ .zig = "binding_rest_element", .estree = "RestElement" },
+    .{ .zig = "object_property", .estree = "Property" },
+    .{ .zig = "identifier_reference", .estree = "Identifier" },
+    .{ .zig = "binding_identifier", .estree = "Identifier" },
+    .{ .zig = "identifier_name", .estree = "Identifier" },
+    .{ .zig = "label_identifier", .estree = "Identifier" },
+    .{ .zig = "ts_bigint_keyword", .estree = "TSBigIntKeyword" },
+    .{ .zig = "ts_jsdoc_nullable_type", .estree = "TSJSDocNullableType" },
+    .{ .zig = "ts_jsdoc_non_nullable_type", .estree = "TSJSDocNonNullableType" },
+    .{ .zig = "ts_jsdoc_unknown_type", .estree = "TSJSDocUnknownType" },
 };
 
 pub fn estreeType(comptime name: []const u8) []const u8 {
-    inline for (NAME_OVERRIDES) |o| if (comptime std.mem.eql(u8, name, o.z)) return o.e;
+    inline for (name_overrides) |o| if (comptime std.mem.eql(u8, name, o.zig)) return o.estree;
     if (comptime std.mem.startsWith(u8, name, "jsx_")) {
         return "JSX" ++ snakeConvert(name[4..], true);
     }
@@ -83,13 +83,13 @@ pub fn estreeType(comptime name: []const u8) []const u8 {
 pub fn estreeField(comptime tag: []const u8, comptime field: []const u8) []const u8 {
     if (comptime std.mem.eql(u8, tag, "variable_declaration") and
         std.mem.eql(u8, field, "declarators")) return "declarations";
-    // const is a zig keyword so the field is is_const, ESTree renders it as const
+    // `const` is a Zig keyword
     if (comptime std.mem.eql(u8, tag, "ts_enum_declaration") and
         std.mem.eql(u8, field, "is_const")) return "const";
     return snakeConvert(field, false);
 }
 
-// arrays that allow holes, sparse elements become null in ESTree
+// sparse arrays, whose holes decode as null
 pub fn isHoleyArray(comptime tag: []const u8, comptime field: []const u8) bool {
     return std.mem.eql(u8, tag, "array_expression") and std.mem.eql(u8, field, "elements");
 }

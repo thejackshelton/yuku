@@ -68,10 +68,8 @@ pub fn parseCover(parser: *Parser) Error!?ObjectCover {
     end = parser.current_token.span.end;
     try parser.advance() orelse return null; // consume }
 
-    const properties = try parser.flushToExtras(&parser.scratch_cover, checkpoint);
-
     return .{
-        .properties = properties,
+        .properties = try parser.flushToExtras(&parser.scratch_cover, checkpoint),
         .start = start,
         .end = end,
     };
@@ -89,7 +87,6 @@ fn parseCoverProperty(parser: *Parser) Error!?ast.NodeIndex {
 
     if (parser.current_token.tag == .async) {
         const async_token = parser.current_token;
-
         try parser.advanceWithoutEscapeCheck() orelse return null;
 
         // async [no LineTerminator here] MethodDefinition
@@ -99,10 +96,7 @@ fn parseCoverProperty(parser: *Parser) Error!?ast.NodeIndex {
             try parser.reportIfEscapedKeyword(async_token);
             is_async = true;
         } else {
-            key = try parser.tree.addNode(
-                .{ .identifier_name = .{ .name = try parser.identifierName(async_token) } },
-                async_token.span,
-            );
+            key = try literals.addIdentifierName(parser, async_token);
         }
     }
 
@@ -112,20 +106,15 @@ fn parseCoverProperty(parser: *Parser) Error!?ast.NodeIndex {
     }
 
     if (key == .null and !is_async and !is_generator) {
-        const cur_tag = parser.current_token.tag;
-        if (cur_tag == .get or cur_tag == .set) {
-            const get_set_token = parser.current_token;
-
+        const get_set_token = parser.current_token;
+        if (get_set_token.tag == .get or get_set_token.tag == .set) {
             try parser.advanceWithoutEscapeCheck() orelse return null;
 
             if (isPropertyKeyStart(parser.current_token.tag)) {
                 try parser.reportIfEscapedKeyword(get_set_token);
-                kind = if (cur_tag == .get) .get else .set;
+                kind = if (get_set_token.tag == .get) .get else .set;
             } else {
-                key = try parser.tree.addNode(
-                    .{ .identifier_name = .{ .name = try parser.identifierName(get_set_token) } },
-                    get_set_token.span,
-                );
+                key = try literals.addIdentifierName(parser, get_set_token);
             }
         }
     }
@@ -280,7 +269,6 @@ fn parseCoverProperty(parser: *Parser) Error!?ast.NodeIndex {
     }
 
     const key_data = parser.tree.data(key);
-
     if (key_data != .identifier_name) {
         try parser.report(
             key_span,
@@ -325,30 +313,14 @@ fn parseObjectMethodProperty(
     is_async: bool,
     is_generator: bool,
 ) Error!?ast.NodeIndex {
-    if (is_generator) {
-        if (kind == .get) {
-            try parser.report(
-                .{ .start = prop_start, .end = parser.current_token.span.end },
-                "Getter cannot be a generator",
-                .{ .help = "Remove the '*' from the getter definition." },
-            );
-            return null;
-        } else if (kind == .set) {
-            try parser.report(
-                .{ .start = prop_start, .end = parser.current_token.span.end },
-                "Setter cannot be a generator",
-                .{ .help = "Remove the '*' from the setter definition." },
-            );
-            return null;
-        }
-    }
+    // `get` and `set` after `async` or `*` are keys, not accessor markers
+    if (is_async) std.debug.assert(kind == .init);
+    if (is_generator) std.debug.assert(kind == .init);
 
     const saved_await_is_keyword = parser.context.await;
     const saved_yield_is_keyword = parser.context.yield;
-
     parser.context.await = is_async;
     parser.context.yield = is_generator;
-
     defer {
         parser.context.await = saved_await_is_keyword;
         parser.context.yield = saved_yield_is_keyword;
@@ -374,7 +346,7 @@ fn parseObjectMethodProperty(
         return_type = try ts.parseReturnTypeAnnotation(parser) orelse return null;
     }
 
-    const body = try functions.parseFunctionBody(parser) orelse return null;
+    const body = try functions.parseFunctionBody(parser, .required) orelse return null;
     const body_end = parser.tree.span(body).end;
 
     const func = try parser.tree.addNode(
@@ -454,15 +426,15 @@ fn toObjectPatternImpl(
         const prop_data = parser.tree.data(prop);
 
         if (prop_data == .spread_element) {
-            if (i == properties.len - 1 and grammar.isFollowedByComma(parser, prop)) {
-                try parser.report(
-                    span,
-                    "Rest element cannot have a trailing comma in object destructuring.",
-                    .{ .help = "Remove the trailing comma after the rest element" },
-                );
-            }
-
-            if (i != properties.len - 1) {
+            if (i == properties.len - 1) {
+                if (grammar.isFollowedByComma(parser, prop)) {
+                    try parser.report(
+                        span,
+                        "Rest element cannot have a trailing comma in object destructuring.",
+                        .{ .help = "Remove the trailing comma after the rest element" },
+                    );
+                }
+            } else {
                 try parser.report(
                     parser.tree.span(prop),
                     "Rest element must be the last property",
@@ -496,7 +468,6 @@ fn toObjectPatternImpl(
         }
 
         const obj_prop = prop_data.object_property;
-
         if (obj_prop.method) {
             try parser.report(
                 parser.tree.span(prop),

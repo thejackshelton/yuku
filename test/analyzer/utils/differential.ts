@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import ts from "typescript";
+import type { SourceType } from "yuku-parser";
 import type { CorpusFile } from "../../corpus";
 
 export interface Comparison {
@@ -53,4 +55,76 @@ export function differential(
     },
     600_000,
   );
+}
+
+interface SingleFile {
+  name: string;
+  source: string;
+  kind: ts.ScriptKind;
+  sourceType: SourceType;
+}
+
+interface SingleFileProgram {
+  program: ts.Program;
+  file: ts.SourceFile;
+  /** Whether tsc reports an error naming `name` at one of `positions`. */
+  rejects(name: string, positions: number[]): boolean;
+}
+
+const { getSetExternalModuleIndicator } = ts as unknown as {
+  getSetExternalModuleIndicator(options: ts.CompilerOptions): (file: ts.SourceFile) => void;
+};
+
+// a tsc program of one file and no lib, a module or a script as yuku reads it
+export function singleFileProgram(
+  single: SingleFile,
+  compilerOptions: ts.CompilerOptions,
+  writeFile: ts.WriteFileCallback = () => {},
+): SingleFileProgram {
+  const options: ts.CompilerOptions = {
+    ...compilerOptions,
+    noLib: true,
+    noResolve: true,
+    moduleDetection:
+      single.sourceType === "module" ? ts.ModuleDetectionKind.Force : ts.ModuleDetectionKind.Legacy,
+  };
+  const file = ts.createSourceFile(
+    single.name,
+    single.source,
+    {
+      languageVersion: ts.ScriptTarget.ESNext,
+      setExternalModuleIndicator: getSetExternalModuleIndicator(options),
+    },
+    true,
+    single.kind,
+  );
+  const host: ts.CompilerHost = {
+    getSourceFile: (name) => (name === single.name ? file : undefined),
+    getDefaultLibFileName: () => "lib.d.ts",
+    writeFile,
+    getCurrentDirectory: () => "",
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: (name) => name === single.name,
+    readFile: () => undefined,
+  };
+  const program = ts.createProgram([single.name], options, host);
+  let errors: readonly ts.Diagnostic[] | null = null;
+  return {
+    program,
+    file,
+    rejects(name, positions) {
+      errors ??= [
+        ...program.getSyntacticDiagnostics(file),
+        ...program.getSemanticDiagnostics(file),
+      ];
+      const quoted = `'${name}'`;
+      return errors.some(({ start, length, messageText }) => {
+        if (start === undefined || length === undefined) return false;
+        if (!ts.flattenDiagnosticMessageText(messageText, "\n").includes(quoted)) return false;
+        return positions.some((position) => position >= start && position < start + length);
+      });
+    },
+  };
 }

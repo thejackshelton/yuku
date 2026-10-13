@@ -2,8 +2,9 @@ import { Analyzer } from "./analyzer.js";
 
 export { Analyzer };
 export { BindingFlags } from "./decode.js";
+export { ready } from "yuku-parser/wasm";
 
 export function analyze(source, options = {}) {
-  const { path = "input.js", core, ...rest } = options;
-  return new Analyzer({ core }).setFile(path, source, rest);
+  const { path = "input.js", wasm, ...rest } = options;
+  return new Analyzer({ wasm }).setFile(path, source, rest);
 }

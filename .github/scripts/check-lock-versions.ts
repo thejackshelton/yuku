@@ -17,20 +17,22 @@ interface PackageManifest {
 
 const root = join(import.meta.dir, "..", "..");
 
-// bun.lock is JSONC, the only non-JSON syntax it uses is trailing commas.
-const parseJsonc = <T>(text: string): T => JSON.parse(text.replace(/,(\s*[}\]])/g, "$1")) as T;
-
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, "utf8")) as T;
 
-const lock = parseJsonc<BunLock>(readFileSync(join(root, "bun.lock"), "utf8"));
+// bun.lock is JSON with trailing commas
+const lockText = readFileSync(join(root, "bun.lock"), "utf8");
+const lock = JSON.parse(lockText.replace(/,(\s*[}\]])/g, "$1")) as BunLock;
 
 const stale: string[] = [];
 
-for (const [dir, entry] of Object.entries(lock.workspaces)) {
-  if (dir === "" || !entry.version) continue;
-  const pkg = readJson<PackageManifest>(join(root, dir, "package.json"));
-  if (entry.version !== pkg.version) {
-    stale.push(`${pkg.name}: bun.lock has ${entry.version}, ${dir}/package.json has ${pkg.version}`);
+for (const [directory, entry] of Object.entries(lock.workspaces)) {
+  if (directory === "" || !entry.version) continue;
+  const manifest = readJson<PackageManifest>(join(root, directory, "package.json"));
+  if (entry.version !== manifest.version) {
+    stale.push(
+      `${manifest.name}: bun.lock has ${entry.version}, ` +
+        `${directory}/package.json has ${manifest.version}`,
+    );
   }
 }
 
@@ -45,6 +47,5 @@ if (stale.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  `bun.lock workspace versions match package.json (${Object.keys(lock.workspaces).length - 1} packages)`,
-);
+const count = Object.keys(lock.workspaces).length - 1;
+console.log(`bun.lock workspace versions match package.json (${count} packages)`);

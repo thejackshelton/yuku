@@ -3,13 +3,13 @@ const ast = @import("../ast.zig");
 
 const Allocator = std.mem.Allocator;
 
-/// Controls what happens at each node during traversal.
+/// What the walk does after a node's enter hooks.
 pub const Action = enum {
-    /// Keep going into children.
+    /// Walk the node's children.
     proceed,
-    /// Skip this node's children, move to the next sibling.
+    /// Skip the node's children and move to the next sibling.
     skip,
-    /// Stop the entire traversal right now.
+    /// Stop the whole traversal.
     stop,
 };
 
@@ -34,9 +34,13 @@ const walk_depth_max = 256;
 const walk_enter_only = walk_depth_max + 1;
 const walk_exit_only = walk_depth_max + 2;
 
+// hooks on a mutable tree may replace nodes, so the walk re-reads them
+fn mutatesTree(comptime C: type) bool {
+    return !@typeInfo(@FieldType(C, "tree")).pointer.attrs.@"const";
+}
+
 fn ExitData(comptime C: type) type {
-    const tree_pointer = @typeInfo(@FieldType(C, "tree")).pointer;
-    return if (tree_pointer.attrs.@"const") void else *const ast.NodeData;
+    return if (mutatesTree(C)) *const ast.NodeData else void;
 }
 
 fn walkNode(
@@ -49,8 +53,8 @@ fn walkNode(
     exit_data: ExitData(C),
 ) Allocator.Error!Action {
     if (index == .null) return .proceed;
-    const deep = depth >= walk_depth_max;
-    if (deep and depth == walk_depth_max) return walkDeep(C, V, visitor, ctx, index);
+    if (depth == walk_depth_max) return walkDeep(C, V, visitor, ctx, index);
+    const deep = depth > walk_depth_max;
 
     var action: Action = .proceed;
     var result: Action = .proceed;
@@ -59,14 +63,13 @@ fn walkNode(
         const data = ctx.tree.data(index);
         action = try dispatch.enter(C, V, visitor, data, index, ctx);
 
-        // re-read after enter so a replaced node walks the replacement's children
-        current = if (comptime ExitData(C) == void) data else ctx.tree.data(index);
+        current = if (comptime mutatesTree(C)) ctx.tree.data(index) else data;
 
         if (deep) return action;
         if (action == .proceed) result = try walkChildren(C, V, visitor, ctx, current, depth + 1);
     } else {
         std.debug.assert(depth == walk_exit_only);
-        current = if (comptime ExitData(C) == void) ctx.tree.data(index) else exit_data.*;
+        current = if (comptime mutatesTree(C)) exit_data.* else ctx.tree.data(index);
     }
 
     dispatch.exit(C, V, visitor, current, index, ctx);
@@ -111,15 +114,15 @@ fn walkStructFields(
             if (action == .stop) return .stop;
         } else if (Field == ast.IndexRange) {
             const range = @field(payload, name);
-            if (comptime @typeInfo(@TypeOf(ctx.tree)).pointer.attrs.@"const") {
-                for (ctx.tree.extra(range)) |child| {
+            if (comptime mutatesTree(C)) {
+                // a visitor may append extras and move the backing array
+                for (0..range.len) |i| {
+                    const child = ctx.tree.extra(range)[i];
                     const action = try walkNode(C, V, visitor, ctx, child, depth, undefined);
                     if (action == .stop) return .stop;
                 }
             } else {
-                // a visitor may append extras and move the backing array
-                for (0..range.len) |i| {
-                    const child = ctx.tree.extra(range)[i];
+                for (ctx.tree.extra(range)) |child| {
                     const action = try walkNode(C, V, visitor, ctx, child, depth, undefined);
                     if (action == .stop) return .stop;
                 }
@@ -153,7 +156,7 @@ noinline fn walkDeep(
     while (steps.pop()) |step| {
         const index = step.index;
         if (step.exit) |data| {
-            const exit_data = if (comptime ExitData(C) == void) {} else &data;
+            const exit_data = if (comptime mutatesTree(C)) &data else {};
             _ = try walkNode(C, V, visitor, ctx, index, walk_exit_only, exit_data);
             continue;
         }
@@ -240,10 +243,9 @@ pub fn Layer(comptime C: type, comptime V: type) type {
     };
 }
 
-/// Dispatch helpers for calling visitor hooks.
-pub const dispatch = struct {
-    /// Dispatches the enter phase, calls `enter_node` first, then the typed hook.
-    pub fn enter(
+const dispatch = struct {
+    // `enter_node` first, then the typed hook such as `enter_function`
+    fn enter(
         comptime C: type,
         comptime V: type,
         visitor: *V,
@@ -258,18 +260,6 @@ pub const dispatch = struct {
                 .proceed => {},
             }
         }
-        return enterTyped(C, V, visitor, data, index, ctx);
-    }
-
-    /// Dispatches only the typed enter hook (e.g. `enter_function`), skipping `enter_node`.
-    pub fn enterTyped(
-        comptime C: type,
-        comptime V: type,
-        visitor: *V,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *C,
-    ) Allocator.Error!Action {
         switch (data) {
             inline else => |node, tag| {
                 if (comptime @hasDecl(V, "enter_" ++ @tagName(tag))) {
@@ -281,23 +271,8 @@ pub const dispatch = struct {
         }
     }
 
-    /// Dispatches the exit phase, calls the typed hook first, then `exit_node`.
-    pub fn exit(
-        comptime C: type,
-        comptime V: type,
-        visitor: *V,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *C,
-    ) void {
-        exitTyped(C, V, visitor, data, index, ctx);
-        if (comptime @hasDecl(V, "exit_node")) {
-            visitor.exit_node(data, index, ctx);
-        }
-    }
-
-    /// Dispatches only the typed exit hook (e.g. `exit_function`), skipping `exit_node`.
-    pub fn exitTyped(
+    // the typed hook first, then `exit_node`
+    fn exit(
         comptime C: type,
         comptime V: type,
         visitor: *V,
@@ -312,6 +287,9 @@ pub const dispatch = struct {
                 }
             },
         }
+        if (comptime @hasDecl(V, "exit_node")) {
+            visitor.exit_node(data, index, ctx);
+        }
     }
 };
 
@@ -321,8 +299,9 @@ inline fn unwrapAction(result: anytype) Allocator.Error!Action {
 
 fn validateHooks(comptime V: type) void {
     for (@typeInfo(V).@"struct".decl_names) |name| {
-        if (comptime std.mem.eql(u8, name, "enter_node") or std.mem.eql(u8, name, "exit_node"))
+        if (comptime std.mem.eql(u8, name, "enter_node") or std.mem.eql(u8, name, "exit_node")) {
             continue;
+        }
 
         const node_name = if (std.mem.startsWith(u8, name, "enter_"))
             name["enter_".len..]
@@ -351,38 +330,38 @@ fn validateHooks(comptime V: type) void {
     }
 }
 
-/// Tracks the path of node indices from root to the current position.
+/// The node indices from the root to the current node.
 pub const NodePath = struct {
     items: []ast.NodeIndex = &.{},
     len: usize = 0,
 
-    /// Returns the parent node index, or `null` if at the root.
+    /// The parent of the current node, or `null` at the root.
     pub inline fn parent(self: *const NodePath) ?ast.NodeIndex {
         return self.ancestor(1);
     }
 
-    /// Returns the nth ancestor. 0 = current node, 1 = parent, 2 = grandparent, etc.
+    /// The nth ancestor, 0 for the current node and 1 for its parent.
     pub inline fn ancestor(self: *const NodePath, n: usize) ?ast.NodeIndex {
         if (n >= self.len) return null;
         return self.items[self.len - 1 - n];
     }
 
-    /// Returns the current nesting depth (1 at the root).
+    /// The nesting depth, 1 at the root.
     pub inline fn depth(self: *const NodePath) usize {
         return self.len;
     }
 
-    /// Returns an iterator that walks from the current node up to the root.
+    /// Walks from the current node up to the root, yielding the current node first.
     pub fn ancestors(self: *const NodePath) AncestorIterator {
         return .{ .items = self.items[0..self.len], .pos = self.len };
     }
 
-    /// Walks up from the current node to root, yielding each node index.
+    /// Yields each node index from the current node up to the root.
     pub const AncestorIterator = struct {
         items: []const ast.NodeIndex,
         pos: usize,
 
-        /// Returns the next ancestor node index, or `null` when the root has been passed.
+        /// The next node up the path, or `null` past the root.
         pub fn next(self: *AncestorIterator) ?ast.NodeIndex {
             if (self.pos == 0) return null;
             self.pos -= 1;
@@ -390,14 +369,14 @@ pub const NodePath = struct {
         }
     };
 
-    /// Adds a node to the path when entering it.
+    /// Pushes a node as it is entered.
     pub fn push(self: *NodePath, index: ast.NodeIndex) void {
         std.debug.assert(index != .null);
         self.items[self.len] = index;
         self.len += 1;
     }
 
-    /// Removes the current node from the path when exiting it.
+    /// Pops the current node as it is exited.
     pub fn pop(self: *NodePath) void {
         std.debug.assert(self.len > 0);
         self.len -= 1;

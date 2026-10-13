@@ -11,17 +11,18 @@ import type {
   NumericLiteral,
   PrivateFieldExpression,
   RegExpLiteral,
+  StandardNodeType,
   StaticMemberExpression,
   StringLiteral,
 } from "@yuku-toolchain/types";
 import { ALIAS_GROUPS, type AliasMap, type AliasName } from "./aliases.js";
 import { NODE_TYPES } from "./generated.js";
 
-type MaybeNode = Node | null | undefined;
+export type MaybeNode = Node | null | undefined;
 
-// the generated list must cover every NodeType, both directions checked
-type _missing = Record<Exclude<NodeType, (typeof NODE_TYPES)[number]>, never>;
-type _extra = Record<Exclude<(typeof NODE_TYPES)[number], NodeType>, never>;
+// NODE_TYPES must match StandardNodeType exactly
+type _missing = Record<Exclude<StandardNodeType, (typeof NODE_TYPES)[number]>, never>;
+type _extra = Record<Exclude<(typeof NODE_TYPES)[number], StandardNodeType>, never>;
 const _exhaustive: [_missing, _extra] = [{}, {}];
 void _exhaustive;
 
@@ -30,7 +31,7 @@ function aliasGuard<K extends AliasName>(name: K): (node: MaybeNode) => node is 
   return (node): node is AliasMap[K] => node != null && set.has(node.type);
 }
 
-type ConcreteGuards = { [K in NodeType]: (node: MaybeNode) => node is NodeOfType<K> };
+type ConcreteGuards = { [K in StandardNodeType]: (node: MaybeNode) => node is NodeOfType<K> };
 
 const concrete = Object.fromEntries(
   NODE_TYPES.map((type) => [type, (node: MaybeNode) => node != null && node.type === type]),
@@ -51,7 +52,7 @@ export const is = {
 
   /** True when `node.type` is one of `types`, narrowing to that union. */
   oneOf: <const K extends NodeType>(node: MaybeNode, types: readonly K[]): node is NodeOfType<K> =>
-    node != null && types.some((type) => type === node.type),
+    node != null && (types as readonly string[]).includes(node.type),
 
   /** An `Identifier`, optionally with the exact `name`. */
   Identifier: (node: MaybeNode, name?: string): node is Identifier =>

@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("../ast.zig");
 const ecmascript = @import("../ecmascript.zig");
+const dialect = @import("../dialect.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -40,12 +41,8 @@ pub const Scope = struct {
         class,
         /// Section 15.7.11 ClassStaticBlockDefinitionEvaluation.
         static_block,
-        /// The scope holding a named function or class expression's own
-        /// name, between the outer scope and the body (15.2.5, 15.7.14).
-        ///
-        ///   outer scope (x lives here)
-        ///     expression_name scope (foo lives here)
-        ///       function scope (body bindings live here)
+        /// The scope of a named function or class expression's own name,
+        /// between the outer scope and the body (15.2.5, 15.7.14).
         expression_name,
 
         /// A TS namespace body, a hoist target so its `var`s do not escape.
@@ -57,8 +54,6 @@ pub const Scope = struct {
         ///
         ///   function f(a: T) { type T = {} }
         ///   //            ^ unresolved, T is local to the body
-        ///   function f(a = () => x) { var x }
-        ///   //                        ^ invisible to the default's closure
         function_body,
 
         /// Whether `var` declarations can hoist to this kind. `function_body`
@@ -71,7 +66,6 @@ pub const Scope = struct {
         }
     };
 
-    /// Scope-level flags.
     pub const Flags = struct {
         /// Whether this scope is in strict mode.
         strict: bool = false,
@@ -202,28 +196,16 @@ pub const ScopeTracker = struct {
                 }
             },
             .function => |func| {
-                const flags: Scope.Flags =
-                    if (self.hasRetroActiveUseStrict(func.body))
-                        .{ .strict = true }
-                    else
-                        self.inheritStrictFlag();
-
-                if (isNamedFunctionExpression(func))
+                const flags = self.functionFlags(func.body);
+                if (isNamedFunctionExpression(func)) {
                     try self.pushScope(.expression_name, index, flags);
-
+                }
                 try self.pushScope(.function, index, flags);
             },
             .arrow_function_expression => |expr| {
-                const flags: Scope.Flags =
-                    if (self.hasRetroActiveUseStrict(expr.body))
-                        .{ .strict = true }
-                    else
-                        self.inheritStrictFlag();
-
-                try self.pushScope(.function, index, flags);
+                try self.pushScope(.function, index, self.functionFlags(expr.body));
             },
             .function_body => {
-                // unknown past the path's capacity
                 if (parent == .null) return;
                 const params = switch (self.tree.data(parent)) {
                     .function => |f| f.params,
@@ -238,29 +220,24 @@ pub const ScopeTracker = struct {
                 }
             },
             .block_statement => {
-                // 14.15.2 CatchClauseEvaluation
-                // the catch parameter and block share one scope so 14.15.1 conflicts
-                // surface, unless a parameter expression runs before the block env exists
-                //
+                // a catch body shares the parameter scope so 14.15.1 conflicts surface,
+                // unless a parameter expression runs before the body exists (14.15.2)
                 //   catch (e)       { let e }   // shared, conflict found
-                //   catch ([e = 1]) { let e }   // split, the default
-                //                               // must not see the let
+                //   catch ([e = 1]) { let e }   // split, the default must not see the let
                 const current = self.tree.data(self.currentScope().node);
                 const shares_catch_scope = current == .catch_clause and
                     current.catch_clause.body == index and
                     ecmascript.findPatternExpression(self.tree, current.catch_clause.param) == null;
-                if (!shares_catch_scope)
+                if (!shares_catch_scope) {
                     try self.pushScope(.block, index, self.inheritStrictFlag());
+                }
             },
             .switch_case => {
-                // one case-block scope per switch, the discriminant evaluates
-                // before it exists (14.12.4)
-                //
-                //   switch (x) { case 1: let x }
-                //   //      ^ outer scope    ^ case-block scope
+                // one case-block scope per switch, entered after the discriminant (14.12.4)
                 if (parent == .null) return;
-                if (self.currentScope().node != parent)
+                if (self.currentScope().node != parent) {
                     try self.pushScope(.block, parent, self.inheritStrictFlag());
+                }
             },
             .for_statement,
             .for_in_statement,
@@ -291,56 +268,49 @@ pub const ScopeTracker = struct {
             .class => |cls| {
                 // class code is always strict (15.7.14)
                 const flags = Scope.Flags{ .strict = true };
-
-                if (isNamedClassExpression(cls))
+                if (isNamedClassExpression(cls)) {
                     try self.pushScope(.expression_name, index, flags);
-
+                }
                 try self.pushScope(.class, index, flags);
             },
             .static_block => try self.pushScope(.static_block, index, self.inheritStrictFlag()),
+            .dialect => |node| if (dialect.shape(node.kind).block_scope) {
+                try self.pushScope(.block, index, self.inheritStrictFlag());
+            },
             .decorator => {
-                // a class decorator evaluates outside the class, a member decorator inside
                 try self.decorator_saved.append(self.allocator, self.current);
                 const on_class = parent != .null and self.tree.data(parent) == .class;
-                self.current = if (on_class) self.decoratorEvalScope() else self.classScope();
+                self.current = self.decoratorScope(on_class);
             },
             else => {},
         }
     }
 
-    fn classScope(self: *const ScopeTracker) ScopeId {
+    // a class decorator evaluates outside the class, a member decorator inside
+    fn decoratorScope(self: *const ScopeTracker, on_class: bool) ScopeId {
         var it = self.ancestors(self.current);
-        while (it.next()) |id| {
-            if (self.get(id).kind == .class) return id;
-        }
-        return self.current;
+        const class = while (it.next()) |id| {
+            if (self.get(id).kind == .class) break id;
+        } else return self.current;
+        if (!on_class) return class;
+        const outer = self.get(class).parent;
+        if (self.get(outer).kind == .expression_name) return self.get(outer).parent;
+        return outer;
     }
 
-    fn decoratorEvalScope(self: *const ScopeTracker) ScopeId {
-        var it = self.ancestors(self.current);
-        while (it.next()) |id| {
-            if (self.get(id).kind != .class) continue;
-            const parent = self.get(id).parent;
-            if (parent == .none) break;
-            if (self.get(parent).kind == .expression_name) {
-                return self.get(parent).parent;
-            }
-            return parent;
-        }
-
-        return self.current;
+    // a body's "use strict" covers the parameter list too, so it applies before the parameters
+    fn functionFlags(self: *const ScopeTracker, body_index: ast.NodeIndex) Scope.Flags {
+        return .{ .strict = self.isStrict() or hasUseStrict(self.tree, body_index) };
     }
 
-    // "use strict" covers the parameter list too, so the flag is set before any
-    // parameter is visited
-    fn hasRetroActiveUseStrict(self: *const ScopeTracker, body_index: ast.NodeIndex) bool {
+    fn hasUseStrict(tree: *const ast.Tree, body_index: ast.NodeIndex) bool {
         if (body_index == .null) return false;
-        const body = self.tree.data(body_index);
+        const body = tree.data(body_index);
         if (body != .function_body) return false;
-        for (self.tree.extra(body.function_body.body)) |statement| {
-            const data = self.tree.data(statement);
+        for (tree.extra(body.function_body.body)) |statement| {
+            const data = tree.data(statement);
             if (data != .directive) break;
-            if (std.mem.eql(u8, self.tree.string(data.directive.value), "use strict")) return true;
+            if (std.mem.eql(u8, tree.string(data.directive.value), "use strict")) return true;
         }
         return false;
     }
@@ -349,7 +319,7 @@ pub const ScopeTracker = struct {
         return .{ .strict = self.currentScope().flags.strict };
     }
 
-    // a node pops exactly the scopes recording it as creator, so this cannot drift from `enter`
+    // pops exactly the scopes recording this node as creator, so it cannot drift from `enter`
     pub fn exit(self: *ScopeTracker, index: ast.NodeIndex, data: ast.NodeData) void {
         switch (data) {
             // the root and module scopes live for the whole walk
@@ -400,9 +370,7 @@ pub const ScopeTracker = struct {
 
     /// The scope with the given id.
     pub inline fn get(self: *const ScopeTracker, id: ScopeId) Scope {
-        std.debug.assert(id != .none);
-        std.debug.assert(@backingInt(id) < self.scopes.items.len);
-        return self.scopes.items[@backingInt(id)];
+        return self.toScopeTree().get(id);
     }
 
     /// Whether the current scope is in strict mode.
@@ -412,12 +380,11 @@ pub const ScopeTracker = struct {
 
     /// Walks from `start` up to the root, yielding `start` first.
     pub fn ancestors(self: *const ScopeTracker, start: ScopeId) ScopeTree.AncestorIterator {
-        std.debug.assert(start == .none or @backingInt(start) < self.scopes.items.len);
-        return .{ .list = self.scopes.items, .current = start };
+        return self.toScopeTree().ancestors(start);
     }
 
-    /// Finalizes into an immutable `ScopeTree`.
-    pub fn toScopeTree(self: *ScopeTracker) ScopeTree {
+    /// The scopes pushed so far, as a `ScopeTree`.
+    pub inline fn toScopeTree(self: *const ScopeTracker) ScopeTree {
         return .{ .list = self.scopes.items };
     }
 };

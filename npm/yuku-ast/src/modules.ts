@@ -29,13 +29,10 @@ export interface CollectedImport {
 
 /**
  * The imported bindings of one declaration, one record per specifier.
- * Type-only imports are included with `typeOnly` set, side-effect
- * imports introduce no bindings and yield no records. Composes with a
- * walk: `ImportDeclaration(node) { records.push(...collectImportDeclaration(node)) }`.
+ * Type-only imports are included with `typeOnly` set, and side-effect
+ * imports yield none. Composes with a walk.
  */
-export function collectImportDeclaration(
-  declaration: ImportDeclaration,
-): CollectedImport[] {
+export function collectImportDeclaration(declaration: ImportDeclaration): CollectedImport[] {
   const source = declaration.source.value;
   const declarationTypeOnly = declaration.importKind === "type";
   return declaration.specifiers.map((specifier) => ({
@@ -59,9 +56,7 @@ export function collectImportDeclaration(
 /** Every imported binding of a program, in source order. */
 export function collectImports(program: Program): CollectedImport[] {
   return program.body.flatMap((statement) =>
-    statement.type === "ImportDeclaration"
-      ? collectImportDeclaration(statement)
-      : [],
+    statement.type === "ImportDeclaration" ? collectImportDeclaration(statement) : [],
   );
 }
 
@@ -75,11 +70,7 @@ export interface CollectedExport {
   source: string | null;
   /** True for `export type` and `export { type x }`. */
   typeOnly: boolean;
-  node:
-    | ExportNamedDeclaration
-    | ExportDefaultDeclaration
-    | ExportAllDeclaration
-    | ExportSpecifier;
+  node: ExportNamedDeclaration | ExportDefaultDeclaration | ExportAllDeclaration | ExportSpecifier;
 }
 
 /**
@@ -88,66 +79,57 @@ export interface CollectedExport {
  * to a single record with a null `exported`. Composes with a walk.
  */
 export function collectExportDeclaration(
-  statement:
-    ExportNamedDeclaration | ExportDefaultDeclaration | ExportAllDeclaration,
+  statement: ExportNamedDeclaration | ExportDefaultDeclaration | ExportAllDeclaration,
 ): CollectedExport[] {
-  const out: CollectedExport[] = [];
   switch (statement.type) {
     case "ExportNamedDeclaration": {
       const typeOnly = statement.exportKind === "type";
       if (statement.declaration !== null) {
-        for (const name of declaredNames(statement.declaration)) {
-          out.push({
-            exported: name,
-            local: name,
-            source: null,
-            typeOnly,
-            node: statement,
-          });
-        }
-        break;
+        return declaredNames(statement.declaration).map((name) => ({
+          exported: name,
+          local: name,
+          source: null,
+          typeOnly,
+          node: statement,
+        }));
       }
       const source = statement.source === null ? null : statement.source.value;
-      for (const specifier of statement.specifiers) {
-        out.push({
-          exported: nameOf(specifier.exported),
-          local: source === null ? nameOf(specifier.local) : null,
-          source,
-          typeOnly: typeOnly || specifier.exportKind === "type",
-          node: specifier,
-        });
-      }
-      break;
+      return statement.specifiers.map((specifier) => ({
+        exported: nameOf(specifier.exported),
+        local: source === null ? nameOf(specifier.local) : null,
+        source,
+        typeOnly: typeOnly || specifier.exportKind === "type",
+        node: specifier,
+      }));
     }
     case "ExportDefaultDeclaration": {
       const declaration = statement.declaration;
-      out.push({
-        exported: "default",
-        local:
-          declaration.type === "Identifier"
-            ? declaration.name
-            : "id" in declaration
-              ? (declaration.id?.name ?? null)
-              : null,
-        source: null,
-        typeOnly: false,
-        node: statement,
-      });
-      break;
+      return [
+        {
+          exported: "default",
+          local:
+            declaration.type === "Identifier"
+              ? declaration.name
+              : "id" in declaration
+                ? (declaration.id?.name ?? null)
+                : null,
+          source: null,
+          typeOnly: false,
+          node: statement,
+        },
+      ];
     }
-    case "ExportAllDeclaration": {
-      out.push({
-        exported:
-          statement.exported === null ? null : nameOf(statement.exported),
-        local: null,
-        source: statement.source.value,
-        typeOnly: statement.exportKind === "type",
-        node: statement,
-      });
-      break;
-    }
+    case "ExportAllDeclaration":
+      return [
+        {
+          exported: statement.exported === null ? null : nameOf(statement.exported),
+          local: null,
+          source: statement.source.value,
+          typeOnly: statement.exportKind === "type",
+          node: statement,
+        },
+      ];
   }
-  return out;
 }
 
 /** Every export of a program, in source order. */

@@ -171,13 +171,44 @@ pub fn check(gpa: Allocator, src: []const u8, mode: Mode) void {
 
     // captured before semantic analysis adds its early-error diagnostics
     const parse_clean = !tree.hasErrors();
+    const parse_diagnostics = tree.diagnostics.items.len;
+
+    parser.semantic.check(&tree) catch |e| switch (e) {
+        error.OutOfMemory => return,
+    };
+    // the arena keeps the messages alive once the list rolls back
+    const checked = a.dupe(ast.Diagnostic, tree.diagnostics.items[parse_diagnostics..]) catch
+        return;
+    defer a.free(checked);
+    tree.diagnostics.shrinkRetainingCapacity(parse_diagnostics);
 
     _ = parser.semantic.analyze(&tree) catch |e| switch (e) {
         error.OutOfMemory => return,
     };
+    checkSameDiagnostics(checked, tree.diagnostics.items[parse_diagnostics..]);
     checkSpans(&tree, src);
 
     if (parse_clean) checkRoundTrip(a, mode, src);
+}
+
+// `check` and `analyze` share one checker, so they must report the same early errors
+fn checkSameDiagnostics(checked: []const ast.Diagnostic, analyzed: []const ast.Diagnostic) void {
+    if (checked.len != analyzed.len) {
+        std.debug.panic(
+            "check reported {d} early errors, analyze {d}",
+            .{ checked.len, analyzed.len },
+        );
+    }
+    for (checked, analyzed) |c, d| {
+        if (!std.mem.eql(u8, c.message, d.message) or c.span.start != d.span.start or
+            c.span.end != d.span.end)
+        {
+            std.debug.panic(
+                "check reported '{s}' at {d}..{d}, analyze '{s}' at {d}..{d}",
+                .{ c.message, c.span.start, c.span.end, d.message, d.span.start, d.span.end },
+            );
+        }
+    }
 }
 
 fn checkSpans(tree: *const ast.Tree, src: []const u8) void {
@@ -222,10 +253,7 @@ fn checkTokens(tree: *const ast.Tree, src: []const u8) void {
         const is_last = i + 1 == tokens.len;
         if (t.tag == .eof and !is_last) std.debug.panic("eof token {d} is not last", .{i});
         if (t.span.start == t.span.end and !is_last) {
-            std.debug.panic(
-                "token {d}/{d} at {d} is empty",
-                .{ i, tokens.len, t.span.start },
-            );
+            std.debug.panic("token {d}/{d} at {d} is empty", .{ i, tokens.len, t.span.start });
         }
         prev_end = t.span.end;
     }
@@ -233,17 +261,11 @@ fn checkTokens(tree: *const ast.Tree, src: []const u8) void {
     const last = tokens[tokens.len - 1];
     if (last.tag != .eof) std.debug.panic("last token is {t}, expected eof", .{last.tag});
     if (last.span.start != src.len) {
-        std.debug.panic(
-            "eof at {d}, expected {d}",
-            .{ last.span.start, src.len },
-        );
+        std.debug.panic("eof at {d}, expected {d}", .{ last.span.start, src.len });
     }
     const program_end = tree.span(tree.root).end;
     if (program_end != last.span.end) {
-        std.debug.panic(
-            "program ends at {d}, eof at {d}",
-            .{ program_end, last.span.end },
-        );
+        std.debug.panic("program ends at {d}, eof at {d}", .{ program_end, last.span.end });
     }
 }
 

@@ -24,7 +24,9 @@ function program(source: string) {
 
 function firstExpression(source: string): Expression {
   const statement = program(source).body[0];
-  if (statement?.type !== "ExpressionStatement") throw new Error("expected an expression statement");
+  if (statement?.type !== "ExpressionStatement") {
+    throw new Error("expected an expression statement");
+  }
   return statement.expression;
 }
 
@@ -113,7 +115,8 @@ describe("utils", () => {
   });
 
   test("bindingIdentifiers collects destructuring leaves in order", () => {
-    const [declarator] = findAll(program(`const { a, b: [c = 1, ...d], ...e } = obj;`), "VariableDeclarator");
+    const root = program(`const { a, b: [c = 1, ...d], ...e } = obj;`);
+    const [declarator] = findAll(root, "VariableDeclarator");
     expect(bindingIdentifiers(declarator!.id).map((id) => id.name)).toEqual(["a", "c", "d", "e"]);
   });
 
@@ -138,11 +141,14 @@ describe("utils", () => {
 
 describe("modules", () => {
   test("collectImports covers default, named, namespace, type, and phase", () => {
-    const records = collectImports(
-      program(
-        `import def from "a"; import * as ns from "b"; import { x, type Y, z as w } from "c"; import type T from "d"; import "side";`,
-      ),
-    );
+    const source = [
+      `import def from "a";`,
+      `import * as ns from "b";`,
+      `import { x, type Y, z as w } from "c";`,
+      `import type T from "d";`,
+      `import "side";`,
+    ].join(" ");
+    const records = collectImports(program(source));
     expect(
       records.map((r) => `${r.local}<-${r.imported}@${r.source}${r.typeOnly ? ":type" : ""}`),
     ).toEqual([
@@ -168,11 +174,15 @@ describe("modules", () => {
   });
 
   test("collectExports covers declarations, specifiers, re-exports, star, and default", () => {
-    const records = collectExports(
-      program(
-        `export const a = 1, { b } = obj; export function f() {} export { c, d as e } from "m"; export * as ns from "n"; export * from "o"; export default class G {}`,
-      ),
-    );
+    const source = [
+      `export const a = 1, { b } = obj;`,
+      `export function f() {}`,
+      `export { c, d as e } from "m";`,
+      `export * as ns from "n";`,
+      `export * from "o";`,
+      `export default class G {}`,
+    ].join(" ");
+    const records = collectExports(program(source));
     expect(records.map((r) => `${r.exported ?? "*"}${r.source ? "@" + r.source : ""}`)).toEqual([
       "a",
       "b",

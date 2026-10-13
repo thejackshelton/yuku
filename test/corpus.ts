@@ -39,10 +39,6 @@ function filesUnder(dir: string, sourceTypeOf: (path: string) => SourceType): Co
   return files;
 }
 
-export function corpusFiles(): CorpusFile[] {
-  return CORPUS_DIRS.flatMap(corpusFilesUnder);
-}
-
 export interface LoadedProject {
   project: Project;
   root: string;
@@ -65,17 +61,18 @@ export function loadedProjects(): LoadedProject[] {
   return loaded;
 }
 
-export function projectFiles(): CorpusFile[] {
-  return loadedProjects().flatMap((loaded) => loaded.files);
+export function corpusAndProjectFiles(): CorpusFile[] {
+  const projects = loadedProjects().flatMap((loaded) => loaded.files);
+  return [...CORPUS_DIRS.flatMap(corpusFilesUnder), ...projects];
 }
 
 // batched, so thousands of files never open at once
 export async function forEachCorpusFile(
-  fn: (file: CorpusFile, source: string) => void,
-  files: CorpusFile[] = corpusFiles(),
+  files: CorpusFile[],
+  visit: (file: CorpusFile, source: string) => void,
 ): Promise<void> {
   for (let i = 0; i < files.length; i += BATCH_SIZE) {
     const batch = files.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async (file) => fn(file, await Bun.file(file.path).text())));
+    await Promise.all(batch.map(async (file) => visit(file, await Bun.file(file.path).text())));
   }
 }

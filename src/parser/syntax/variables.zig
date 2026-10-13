@@ -8,16 +8,14 @@ const TokenTag = @import("../token.zig").TokenTag;
 const expressions = @import("expressions.zig");
 const patterns = @import("patterns.zig");
 const ts = @import("ts/types.zig");
-const extension = @import("../extension.zig");
 
-pub const ParseVariableDeclarationOpts = struct {
+pub const ParseVariableDeclarationOptions = struct {
     await_using: bool = false,
-    /// Sets the `declare` flag on the resulting `VariableDeclaration`.
     is_declare: bool = false,
 };
 
 /// Syntactic context of a `VariableDeclarator`, which selects the initializer rules that apply.
-pub const DeclaratorCtx = enum {
+pub const DeclaratorContext = enum {
     /// A regular declaration statement.
     normal,
     /// An ambient `declare` declaration, where initializers may be omitted.
@@ -28,7 +26,7 @@ pub const DeclaratorCtx = enum {
 
 pub fn parseVariableDeclaration(
     parser: *Parser,
-    opts: ParseVariableDeclarationOpts,
+    options: ParseVariableDeclarationOptions,
     start_from_param: ?u32,
 ) Error!?ast.NodeIndex {
     std.debug.assert(start_from_param != null or switch (parser.current_token.tag) {
@@ -36,24 +34,21 @@ pub fn parseVariableDeclaration(
         else => false,
     });
     const start = start_from_param orelse parser.current_token.span.start;
-    const kind = try parseVariableKind(parser, opts.await_using) orelse return null;
+    const kind = try parseVariableKind(parser, options.await_using) orelse return null;
 
     const checkpoint = parser.scratch_a.begin();
     defer parser.scratch_a.reset(checkpoint);
 
-    const ctx: DeclaratorCtx = if (parser.ts_context.ambient) .declare else .normal;
+    const context: DeclaratorContext = if (parser.ts_context.ambient) .declare else .normal;
 
-    const first_declarator = try parseVariableDeclarator(parser, kind, ctx) orelse return null;
-
-    try parser.scratch_a.append(parser.allocator(), first_declarator);
-
-    var end = parser.tree.span(first_declarator).end;
-
-    while (parser.current_token.tag == .comma) {
-        try parser.advance() orelse return null;
-        const declarator = try parseVariableDeclarator(parser, kind, ctx) orelse return null;
+    var end: u32 = undefined;
+    while (true) {
+        const declarator = try parseVariableDeclarator(parser, kind, context) orelse return null;
         try parser.scratch_a.append(parser.allocator(), declarator);
         end = parser.tree.span(declarator).end;
+
+        if (parser.current_token.tag != .comma) break;
+        try parser.advance() orelse return null;
     }
 
     const semi_end = try parser.eatSemicolon(end) orelse return null;
@@ -76,7 +71,7 @@ pub fn parseVariableDeclaration(
             .variable_declaration = .{
                 .declarators = try parser.flushToExtras(&parser.scratch_a, checkpoint),
                 .kind = kind,
-                .declare = opts.is_declare,
+                .declare = options.is_declare,
             },
         },
         span,
@@ -99,9 +94,8 @@ fn parseVariableKind(parser: *Parser, await_using: bool) Error!?ast.VariableKind
 pub fn parseVariableDeclarator(
     parser: *Parser,
     kind: ast.VariableKind,
-    ctx: DeclaratorCtx,
+    context: DeclaratorContext,
 ) Error!?ast.NodeIndex {
-    const is_ts = parser.tree.isTs();
     const start = parser.current_token.span.start;
     var id = try patterns.parseBindingPattern(parser) orelse return null;
     const id_span = parser.tree.span(id);
@@ -110,7 +104,7 @@ pub fn parseVariableDeclarator(
     var annotated = false;
     var end = id_span.end;
 
-    if (is_ts) {
+    if (parser.tree.isTs()) {
         if (parser.current_token.tag == .logical_not and
             !parser.current_token.hasLineTerminatorBefore())
         {
@@ -146,7 +140,7 @@ pub fn parseVariableDeclarator(
         ) orelse return null;
 
         end = parser.tree.span(init).end;
-    } else switch (ctx) {
+    } else switch (context) {
         .for_loop, .declare => {},
         .normal => {
             if (is_destructuring) {
@@ -182,37 +176,18 @@ pub fn parseVariableDeclarator(
     );
 }
 
-/// Returns whether `tag` can begin a `BindingIdentifier` or a destructuring pattern.
-pub fn canStartBinding(tag: TokenTag) bool {
-    if (extension.at(.binding_start, .{tag})) |answer| return answer;
-    return tag.isIdentifierLike() or tag == .left_bracket or tag == .left_brace;
-}
-
 /// Returns whether `tag` can begin a `BindingIdentifier`.
 pub fn canStartBindingIdentifier(tag: TokenTag) bool {
     return tag.isIdentifierLike() and !tag.isUnconditionallyReserved();
-}
-
-/// Like `canStartBinding`, but rejects reserved words so `let in obj` keeps `let` an identifier.
-pub fn canStartLetBinding(tag: TokenTag) bool {
-    return canStartBinding(tag) and !tag.isUnconditionallyReserved();
-}
-
-test "canStartLetBinding accepts patterns and non-reserved identifiers" {
-    inline for (@typeInfo(TokenTag).@"enum".field_names) |name| {
-        const tag = @field(TokenTag, name);
-        try std.testing.expectEqual(
-            tag == .left_bracket or tag == .left_brace or canStartBindingIdentifier(tag),
-            canStartLetBinding(tag),
-        );
-    }
 }
 
 /// Returns whether `let` begins an expression statement rather than a declaration. Only `let [`
 /// is a lookahead restriction, so sloppy-mode `let = 1` and `let in obj` are expressions.
 pub fn isLetIdentifier(parser: *Parser) bool {
     std.debug.assert(parser.current_token.tag == .let);
-    return !canStartLetBinding(parser.peekAhead().tag);
+    const next = parser.peekAhead();
+    if (next.tag == .left_bracket or next.tag == .left_brace) return false;
+    return !canStartBindingIdentifier(next.tag);
 }
 
 /// Returns whether the current `using` is an `IdentifierReference`, not a declaration keyword.

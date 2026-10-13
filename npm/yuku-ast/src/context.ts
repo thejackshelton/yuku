@@ -29,8 +29,7 @@ export class WalkContext<T extends Node = Node, S = unknown> {
 
   /** The node holding {@link node}, or null at the walk root. */
   get parent(): Node | null {
-    const a = this._ancestors;
-    return a.length === 0 ? null : a[a.length - 1]!;
+    return this._ancestors[this._ancestors.length - 1] ?? null;
   }
 
   /** The field on {@link parent} holding {@link node}, or null at the root. */
@@ -92,19 +91,19 @@ export class WalkContext<T extends Node = Node, S = unknown> {
 
   /** Insert a sibling before the current node, not visited. Array fields only. */
   insertBefore(node: Node): void {
-    this.#insert(node, 0);
+    insertSibling(this, node, 0);
     this._frame!.i++;
   }
 
   /** Insert a sibling after the current node, visited by the walk. Array fields only. */
   insertAfter(node: Node): void {
-    this.#insert(node, 1);
+    insertSibling(this, node, 1);
   }
+}
 
-  #insert(node: Node, offset: number): void {
-    if (this._list === null) {
-      throw new TypeError("insertBefore/insertAfter require a node in an array field");
-    }
-    this._list.splice(this._frame!.i + offset, 0, node);
+function insertSibling(ctx: WalkContext, node: Node, offset: number): void {
+  if (ctx._list === null) {
+    throw new TypeError("insertBefore/insertAfter require a node in an array field");
   }
+  ctx._list.splice(ctx._frame!.i + offset, 0, node);
 }

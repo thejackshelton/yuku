@@ -74,12 +74,11 @@ pub fn parseRegExpLiteral(parser: *Parser) Error!?ast.NodeIndex {
     const pattern_start = regex.span.start + 1;
     const pattern_end = pattern_start + @as(u32, @intCast(regex.pattern.len));
     const flags_start = regex.span.end - @as(u32, @intCast(regex.flags.len));
-    const flags_end = regex.span.end;
 
     return try parser.tree.addNode(.{
         .regexp_literal = .{
             .pattern = parser.tree.sourceSlice(pattern_start, pattern_end),
-            .flags = parser.tree.sourceSlice(flags_start, flags_end),
+            .flags = parser.tree.sourceSlice(flags_start, regex.span.end),
         },
     }, regex.span);
 }
@@ -89,7 +88,6 @@ pub fn parseNoSubstitutionTemplate(parser: *Parser, tagged: bool) Error!?ast.Nod
     const token = parser.current_token;
 
     const element = try addTemplateElement(parser, token, true, tagged);
-
     try parser.advance() orelse return null;
 
     return try parser.tree.addNode(.{
@@ -101,36 +99,63 @@ pub fn parseNoSubstitutionTemplate(parser: *Parser, tagged: bool) Error!?ast.Nod
 }
 
 pub fn parseTemplateLiteral(parser: *Parser, tagged: bool) Error!?ast.NodeIndex {
-    std.debug.assert(parser.current_token.tag == .template_head);
     const start = parser.current_token.span.start;
+    const parts = try parseTemplateParts(
+        parser,
+        tagged,
+        "expression",
+        parseTemplateSubstitution,
+    ) orelse return null;
+
+    return try parser.tree.addNode(.{
+        .template_literal = .{ .quasis = parts.quasis, .expressions = parts.substitutions },
+    }, .{ .start = start, .end = parts.end });
+}
+
+fn parseTemplateSubstitution(parser: *Parser) Error!?ast.NodeIndex {
+    return expressions.parseExpression(parser, Precedence.Lowest, .{});
+}
+
+/// The pieces of a template with substitutions, through its closing backtick.
+pub const TemplateParts = struct {
+    quasis: ast.IndexRange,
+    substitutions: ast.IndexRange,
+    end: u32,
+};
+
+/// Parses a template from its head through its tail. `parseSubstitution` parses each `${}`
+/// body, and `noun` names that body in diagnostics.
+pub fn parseTemplateParts(
+    parser: *Parser,
+    tagged: bool,
+    comptime noun: []const u8,
+    comptime parseSubstitution: fn (*Parser) Error!?ast.NodeIndex,
+) Error!?TemplateParts {
+    std.debug.assert(parser.current_token.tag == .template_head);
 
     const quasis_checkpoint = parser.scratch_a.begin();
     defer parser.scratch_a.reset(quasis_checkpoint);
-    const exprs_checkpoint = parser.scratch_b.begin();
-    defer parser.scratch_b.reset(exprs_checkpoint);
+    const substitutions_checkpoint = parser.scratch_b.begin();
+    defer parser.scratch_b.reset(substitutions_checkpoint);
 
     const head = parser.current_token;
-
     try parser.scratch_a.append(
         parser.allocator(),
         try addTemplateElement(parser, head, false, tagged),
     );
-
     try parser.advance() orelse return null;
 
     var end = head.span.end;
-
     while (true) {
-        const expr = try expressions.parseExpression(parser, Precedence.Lowest, .{}) orelse
-            return null;
-        try parser.scratch_b.append(parser.allocator(), expr);
+        const substitution = try parseSubstitution(parser) orelse return null;
+        try parser.scratch_b.append(parser.allocator(), substitution);
 
         // the lexer emits `}` as a punctuator, rescan it as template continuation
         if (parser.current_token.tag != .right_brace) {
             try parser.reportExpected(
                 parser.current_token.span,
-                "Expected '}' to close template expression",
-                .{ .help = "Template expressions must be closed with '}'" },
+                "Expected '}' to close template " ++ noun,
+                .{ .help = "Template " ++ noun ++ "s must be closed with '}'" },
             );
             return null;
         }
@@ -141,39 +166,32 @@ pub fn parseTemplateLiteral(parser: *Parser, tagged: bool) Error!?ast.NodeIndex 
             try parser.reportLexicalError(e);
             return null;
         };
-
         const is_tail = template_token.tag == .template_tail;
 
-        try parser.scratch_a.append(parser.allocator(), try addTemplateElement(
-            parser,
-            template_token,
-            is_tail,
-            tagged,
-        ));
-
+        try parser.scratch_a.append(
+            parser.allocator(),
+            try addTemplateElement(parser, template_token, is_tail, tagged),
+        );
         end = template_token.span.end;
-
         try parser.advanceWithRescannedToken(template_token) orelse return null;
 
         if (is_tail) break;
     }
 
-    return try parser.tree.addNode(.{
-        .template_literal = .{
-            .quasis = try parser.flushToExtras(&parser.scratch_a, quasis_checkpoint),
-            .expressions = try parser.flushToExtras(&parser.scratch_b, exprs_checkpoint),
-        },
-    }, .{ .start = start, .end = end });
+    return .{
+        .quasis = try parser.flushToExtras(&parser.scratch_a, quasis_checkpoint),
+        .substitutions = try parser.flushToExtras(&parser.scratch_b, substitutions_checkpoint),
+        .end = end,
+    };
 }
 
-pub inline fn addTemplateElement(
+inline fn addTemplateElement(
     parser: *Parser,
     token: Token,
     tail: bool,
     tagged: bool,
 ) Error!ast.NodeIndex {
-    const span = getTemplateElementSpan(token);
-
+    const span = templateElementSpan(token);
     const is_cooked_undefined = token.hasInvalidEscape();
 
     if (!tagged and is_cooked_undefined) {
@@ -195,7 +213,7 @@ pub inline fn addTemplateElement(
     }, span);
 }
 
-inline fn getTemplateElementSpan(token: Token) ast.Span {
+inline fn templateElementSpan(token: Token) ast.Span {
     return switch (token.tag) {
         .template_head, .template_middle => .{
             .start = token.span.start + 1,
@@ -210,10 +228,8 @@ inline fn getTemplateElementSpan(token: Token) ast.Span {
 }
 
 pub inline fn parseIdentifier(parser: *Parser) Error!?ast.NodeIndex {
-    try validateIdentifier(parser, "an identifier", parser.current_token);
-
     const token = parser.current_token;
-
+    try validateIdentifier(parser, "an identifier", token);
     try parser.advanceWithoutEscapeCheck() orelse return null;
 
     return try parser.tree.addNode(.{
@@ -222,10 +238,8 @@ pub inline fn parseIdentifier(parser: *Parser) Error!?ast.NodeIndex {
 }
 
 pub inline fn parseBindingIdentifier(parser: *Parser) Error!?ast.NodeIndex {
-    try validateIdentifier(parser, "a binding identifier", parser.current_token);
-
     const token = parser.current_token;
-
+    try validateIdentifier(parser, "a binding identifier", token);
     try parser.advanceWithoutEscapeCheck() orelse return null;
 
     return try parser.tree.addNode(
@@ -248,16 +262,21 @@ pub fn parseIdentifierName(parser: *Parser) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag.isIdentifierLike());
     const token = parser.current_token;
     try parser.advanceWithoutEscapeCheck() orelse return null;
+    return try addIdentifierName(parser, token);
+}
 
-    return try parser.tree.addNode(.{
-        .identifier_name = .{ .name = try parser.identifierName(token) },
-    }, token.span);
+/// Adds an `IdentifierName` node for `token`, which the caller consumes.
+pub fn addIdentifierName(parser: *Parser, token: Token) Error!ast.NodeIndex {
+    std.debug.assert(token.tag.isIdentifierLike());
+    return parser.tree.addNode(
+        .{ .identifier_name = .{ .name = try parser.identifierName(token) } },
+        token.span,
+    );
 }
 
 pub fn parseLabelIdentifier(parser: *Parser) Error!?ast.NodeIndex {
-    try validateIdentifier(parser, "a label", parser.current_token);
-
     const token = parser.current_token;
+    try validateIdentifier(parser, "a label", token);
     try parser.advance() orelse return null;
 
     return try parser.tree.addNode(.{

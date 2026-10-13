@@ -207,10 +207,9 @@ pub fn expressionToPattern(
 
         .binding_identifier => {},
 
-        // `.binding` re-descends every target already converted at `=` under `.assignable`
-        // rules. in `([a.b] = []) => {}` the array becomes an array_pattern at `=`, then at
-        // `=>` it is a parameter where `a.b` and a stripped `(a)` are illegal and `a` must
-        // become a declaring binding_identifier
+        // `.binding` re-descends targets converted under `.assignable` at `=`. in
+        // `([a.b] = []) => {}` the parameter forbids `a.b` and a stripped `(a)`, and `a`
+        // must become a binding_identifier
         .assignment_pattern => |pattern| if (context == .binding) {
             try expressionToPattern(parser, pattern.left, context);
         },

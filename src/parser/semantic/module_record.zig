@@ -11,7 +11,6 @@ const Semantic = binder.Semantic;
 
 /// One dependency edge of the module, static or dynamic.
 pub const Import = struct {
-    /// The import form.
     kind: Kind,
     /// Imported name of a `.named` record, "default" for default imports.
     name: ast.String = .empty,
@@ -49,7 +48,6 @@ pub const Import = struct {
 
 /// One exported name of the module.
 pub const Export = struct {
-    /// The export form.
     kind: Kind,
     /// Exported name, the global name for `.global`, empty otherwise.
     name: ast.String = .empty,

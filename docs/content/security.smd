@@ -18,6 +18,6 @@ We aim to acknowledge reports within 72 hours. Please allow a reasonable window 
 - **No third-party dependencies.** The npm packages depend only on each other and run no install scripts.
 - **Provenance publishing.** Releases publish to npm with provenance through OIDC trusted publishing, with no long-lived tokens.
 - **Hardened CI.** Every action is pinned to a commit hash, workflow tokens are read-only by default, and the workflows are checked by [zizmor](https://github.com/zizmorcore/zizmor) and [OpenSSF Scorecard](https://securityscorecards.dev).
-- **Reproducible builds.** Installs use a frozen lockfile, and the one Zig dependency is pinned by content hash.
-- **Memory safety.** A parse allocates everything in one arena, and the WebAssembly core runs sandboxed from host memory.
+- **Reproducible builds.** Installs use a frozen lockfile, and the Zig build has no dependencies.
+- **Memory safety.** A parse allocates everything in one arena, and the npm packages run Yuku as WebAssembly, sandboxed from host memory.
 - **Fuzzing.** Millions of adversarial inputs per run, see [Testing](/testing/#fuzzing).

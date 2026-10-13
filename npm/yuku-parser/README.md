@@ -17,7 +17,13 @@ A fast, spec-compliant JavaScript and TypeScript parser, part of [Yuku](https://
 npm install yuku-parser
 ```
 
-It runs on Yuku's native core, installed for your platform. In browsers and edge runtimes, load the WebAssembly core from [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm) and pass it in as `core`.
+It runs Yuku as WebAssembly in Node.js, Bun, Deno, browsers, and edge runtimes. A browser compiles it after import, so it awaits `ready` once before the first parse.
+
+```js
+import { parse, ready } from "yuku-parser";
+
+await ready;
+```
 
 ## Usage
 
@@ -54,7 +60,8 @@ parse(source, { path: "src/app.tsx" });
 | `semanticErrors` | `true`, `false`                           | `false`    | Also report the early errors that need scopes, such as redeclarations and `break` outside a loop.  |
 | `attachComments` | `true`, `false`                           | `false`    | Also attach each comment to its node. See [Comments](#comments).                                   |
 | `tokens`         | `true`, `false`                           | `false`    | Keep every token. See [Tokens](#tokens).                                                           |
-| `core`           | a loaded core                             | native     | The core that parses, see [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm).      |
+| `dialect`        | `true`, `false`                           | `false`    | Read the source with the [dialect](https://yuku.fyi/parser/dialect/#javascript) built into `wasm`. |
+| `wasm`           | a `WebAssembly.Module`                    | its own    | The build of Yuku that parses, one with a dialect compiled in.                                     |
 
 An unknown `lang` or `sourceType` throws a `TypeError`. `langFromPath(path)` and `sourceTypeFromPath(path)` return the values a path implies.
 

@@ -7,6 +7,7 @@
   --accent: #bf982f;
   --accent-ink: #2c271e;
   --sel: #ecddb0;
+  --hover: color-mix(in srgb, var(--sel) 40%, transparent);
   --ok: #589a64;
   --warn: #c0822f;
   --err: #c2605a;
@@ -108,13 +109,19 @@ header {
   gap: 6px;
 }
 
-.opts select {
+.opts select,
+.opts input[type="number"] {
   background: var(--bg);
   color: var(--fg);
   border: 1px solid var(--line);
   font-family: inherit;
   font-size: 12px;
   padding: 2px 6px;
+}
+
+.opts input[type="number"] {
+  width: 3.5em;
+  padding: 2px 4px;
 }
 
 .opts input[type="checkbox"] {
@@ -180,9 +187,7 @@ main {
 .view {
   flex: 1;
   width: 100%;
-  border: none;
   outline: none;
-  resize: none;
   background: var(--bg);
   color: var(--fg);
   font-family: inherit;
@@ -227,7 +232,7 @@ main {
 }
 
 .sem-sym:hover {
-  background: color-mix(in srgb, var(--sel) 40%, transparent);
+  background: var(--hover);
 }
 
 .sem-site {
@@ -238,7 +243,8 @@ main {
   color: var(--fg);
 }
 
-.sem-flag {
+.sem-flag,
+.problem-count {
   font-size: 10px;
   padding: 0 5px;
   border: 1px solid var(--line);
@@ -397,16 +403,6 @@ main {
   letter-spacing: normal;
 }
 
-.opts input[type="number"] {
-  width: 3.5em;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  font-family: inherit;
-  font-size: 12px;
-  padding: 2px 4px;
-}
-
 .pane-head .opts select,
 .pane-head .opts input[type="number"] {
   font-size: 11px;
@@ -555,7 +551,7 @@ main {
 }
 
 .problem:hover {
-  background: color-mix(in srgb, var(--sel) 40%, transparent);
+  background: var(--hover);
 }
 
 .problem-chev {
@@ -576,11 +572,6 @@ main {
 
 .problem-count {
   flex: none;
-  font-size: 10px;
-  padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--dim);
 }
 
 .problem-detail {
@@ -588,14 +579,20 @@ main {
 }
 
 .problem-rel,
-.problem-help {
+.problem-help,
+.tip-rel,
+.tip-help {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 2px 6px;
-  border-radius: 4px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.problem-rel,
+.problem-help {
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .problem-rel {
@@ -603,7 +600,7 @@ main {
 }
 
 .problem-rel:hover {
-  background: color-mix(in srgb, var(--sel) 40%, transparent);
+  background: var(--hover);
 }
 
 .rel-arrow {
@@ -615,7 +612,9 @@ main {
   color: var(--dim);
 }
 
-.problem-rel:hover .rel-msg {
+.problem-rel:hover .rel-msg,
+.tip-rel:hover .rel-msg,
+.tip-rel-focus .rel-msg {
   color: var(--fg);
 }
 
@@ -704,46 +703,26 @@ main {
   overflow-wrap: anywhere;
 }
 
-.tip-rels {
+.tip-rels,
+.tip-help {
   margin-top: 8px;
   padding-top: 6px;
   border-top: 1px solid var(--line);
 }
 
 .tip-rel {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
   margin-inline: -6px;
   padding: 2px 6px;
   border-radius: 4px;
   cursor: pointer;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .tip-rel:hover {
-  background: color-mix(in srgb, var(--sel) 40%, transparent);
+  background: var(--hover);
 }
 
 .tip-rel-focus {
   background: var(--sel);
-}
-
-.tip-rel:hover .rel-msg,
-.tip-rel-focus .rel-msg {
-  color: var(--fg);
-}
-
-.tip-help {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {

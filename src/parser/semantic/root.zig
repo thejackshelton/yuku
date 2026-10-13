@@ -9,18 +9,31 @@ pub const module_record = @import("module_record.zig");
 pub const Semantic = semantic.Semantic;
 pub const AnalysisError = checker.AnalysisError;
 
-/// Runs semantic analysis on a tree, building the `Semantic` model and
-/// reporting scope-dependent early errors. Diagnostics go on the tree and
-/// all allocations use its arena.
+/// Reports the scope-dependent early errors of a tree, tracking only the
+/// scopes and bindings they depend on. Diagnostics go on the tree and
+/// allocations use its arena.
+pub fn check(tree: *ast.Tree) AnalysisError!void {
+    std.debug.assert(tree.root != .null);
+
+    var ctx = try semantic.Ctx.init(tree, .check);
+    try walk(tree, &ctx);
+}
+
+/// Reports the same early errors as `check` and returns the `Semantic` model.
 pub fn analyze(tree: *ast.Tree) AnalysisError!Semantic {
     std.debug.assert(tree.root != .null);
 
+    var ctx = try semantic.Ctx.init(tree, .analyze);
+    try walk(tree, &ctx);
+    return ctx.finalize();
+}
+
+fn walk(tree: *ast.Tree, ctx: *semantic.Ctx) AnalysisError!void {
     var visitor = checker.Checker{
         .tree = tree,
         .allocator = tree.allocator(),
     };
-
-    const sem = try semantic.traverse(checker.Checker, tree, &visitor);
-    try visitor.checkExports(sem);
-    return sem;
+    var layer = traverser.Layer(semantic.Ctx, checker.Checker){ .inner = &visitor };
+    try traverser.walk(semantic.Ctx, @TypeOf(layer), &layer, ctx);
+    try visitor.checkExports(&ctx.symbols);
 }

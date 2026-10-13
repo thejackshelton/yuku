@@ -69,10 +69,8 @@ pub fn parseCover(parser: *Parser) Error!?ArrayCover {
     end = parser.current_token.span.end;
     try parser.advance() orelse return null; // consume ]
 
-    const elements = try parser.flushToExtras(&parser.scratch_cover, checkpoint);
-
     return .{
-        .elements = elements,
+        .elements = try parser.flushToExtras(&parser.scratch_cover, checkpoint),
         .start = start,
         .end = end,
     };
@@ -128,15 +126,15 @@ fn toArrayPatternImpl(
         if (elem == .null) continue;
 
         if (parser.tree.data(elem) == .spread_element) {
-            if (i == elements_len - 1 and grammar.isFollowedByComma(parser, elem)) {
-                try parser.report(
-                    span,
-                    "Rest element cannot have a trailing comma in array destructuring.",
-                    .{ .help = "Remove the trailing comma after the rest element" },
-                );
-            }
-
-            if (i != elements_len - 1) {
+            if (i == elements_len - 1) {
+                if (grammar.isFollowedByComma(parser, elem)) {
+                    try parser.report(
+                        span,
+                        "Rest element cannot have a trailing comma in array destructuring.",
+                        .{ .help = "Remove the trailing comma after the rest element" },
+                    );
+                }
+            } else {
                 try parser.report(
                     parser.tree.span(elem),
                     "Rest element must be the last element",

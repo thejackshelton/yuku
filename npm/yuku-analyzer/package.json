@@ -11,7 +11,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "engines": {
-    "node": ">=14.18.0"
+    "node": ">=18.0.0"
   },
   "files": [
     "index.js",
@@ -38,6 +38,6 @@
   "dependencies": {
     "@yuku-toolchain/types": "workspace:^",
     "yuku-ast": "workspace:^",
-    "yuku-core": "workspace:*"
+    "yuku-parser": "workspace:^"
   }
 }

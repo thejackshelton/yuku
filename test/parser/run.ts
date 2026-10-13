@@ -146,7 +146,7 @@ type SnapshotResult =
 const isCI = !!process.env.CI;
 const updateSnapshots = process.argv.includes("--update-snapshots");
 
-function baseName(file: string): string {
+function stem(file: string): string {
   const name = basename(file);
   const dot = name.indexOf(".");
   return dot >= 0 ? name.substring(0, dot) : name;
@@ -181,7 +181,7 @@ async function checkSnapshot(
   parsed: ParseResult,
   suite: TestSuite,
 ): Promise<SnapshotResult> {
-  const snapshotFile = join(dirname(file), "snapshots", `${baseName(file)}.snapshot.json`);
+  const snapshotFile = join(dirname(file), "snapshots", `${stem(file)}.snapshot.json`);
 
   const comparable = {
     program: parsed.program,
@@ -189,21 +189,16 @@ async function checkSnapshot(
     diagnostics: parsed.diagnostics,
   };
 
-  if (!(await Bun.file(snapshotFile).exists())) {
-    if (suite.expect !== "snapshot") return { status: "no_snapshot" };
-    await Bun.write(snapshotFile, serializeAstJson(comparable, 2));
-    return { status: "match" };
+  if (await Bun.file(snapshotFile).exists()) {
+    const snapshot = deserializeAstJson(await Bun.file(snapshotFile).text());
+    if (equal(comparable, snapshot)) return { status: "match" };
+    if (!updateSnapshots) return { status: "mismatch", snapshot };
+  } else if (suite.expect !== "snapshot") {
+    return { status: "no_snapshot" };
   }
 
-  const snapshot = deserializeAstJson(await Bun.file(snapshotFile).text());
-  if (equal(comparable, snapshot)) return { status: "match" };
-
-  if (updateSnapshots) {
-    await Bun.write(snapshotFile, serializeAstJson(comparable, 2));
-    return { status: "match" };
-  }
-
-  return { status: "mismatch", snapshot };
+  await Bun.write(snapshotFile, serializeAstJson(comparable, 2));
+  return { status: "match" };
 }
 
 let progressCurrent = 0;

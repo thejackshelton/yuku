@@ -1,4 +1,3 @@
-import { load } from "yuku-core";
 import { BindingFlags } from "./decode.js";
 import { Module } from "./module.js";
 
@@ -16,7 +15,7 @@ const SOURCE_EXTENSIONS = new Map([
 const AMBIGUOUS = Symbol("ambiguous");
 
 export class Analyzer {
-  #core;
+  #wasm;
   #modules = new Map();
   #resolve;
   #diagnostics = [];
@@ -24,18 +23,18 @@ export class Analyzer {
   // defining binding to the import bindings that resolve to it
   #importers = new Map();
   #exportResolutions = new Map();
-  // each binding a module augmentation merges to the whole merge, the augmented binding first
+  // each merged binding to its whole merge, the augmented binding first
   #merged = new Map();
   // the names module augmentations add to a module
   #addedExports = new Map();
 
   constructor(options = {}) {
-    this.#core = options.core ?? load();
+    this.#wasm = options.wasm;
     this.#resolve = options.resolve ?? defaultResolve(this.#modules);
   }
 
   setFile(path, source, options) {
-    const module = new Module(this, this.#core, path, source, options);
+    const module = new Module(this, path, source, { ...options, wasm: this.#wasm });
     this.#modules.set(path, module);
     this.#dirty = true;
     return module;

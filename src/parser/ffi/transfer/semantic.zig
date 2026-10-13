@@ -1,16 +1,16 @@
-// the analyzer buffer is the core AST buffer with FLAG_SEMANTIC set, then 4-byte-aligned
-// tables after the diagnostics section, the decoder derives use lists itself
+// the analyzer buffer is the AST buffer with FLAG_SEMANTIC set, then these tables after the
+// diagnostics, aligned to 4 bytes. the decoder derives use lists itself
 //
-//   sub-header   SUBHEADER_SIZE bytes, section counts
+//   sub-header   SUBHEADER_SIZE bytes
 //   scopes       scope_count * SCOPE_SIZE, one PackedScope each
 //   symbols      symbol_count * SYMBOL_SIZE, one PackedSymbol each
-//   decl_nodes   decl_node_count * 4, flat NodeIndex array backing `PackedSymbol.decls_start/len`
-//   references   reference_count * REFERENCE_SIZE, one PackedReference each, resolution folded in
+//   decl_nodes   decl_node_count * 4, the NodeIndex array behind `PackedSymbol.decls_*`
+//   references   reference_count * REFERENCE_SIZE, one resolved PackedReference each
 //   imports      import_count * IMPORT_SIZE, one PackedImport each
 //   exports      export_count * EXPORT_SIZE, one PackedExport each
-//   node_scopes  node_scope_count * 4, one ScopeId per node indexed by node index
+//   node_scopes  node_scope_count * 4, the ScopeId of each node
 //
-// ScopeId.none, SymbolId.none and NodeIndex.null all encode as 0xFFFFFFFF
+// ScopeId.none, SymbolId.none, and NodeIndex.null all encode as 0xFFFFFFFF
 
 const std = @import("std");
 const parser = @import("parser");
@@ -197,15 +197,9 @@ comptime {
     std.debug.assert(@bitOffsetOf(module_record.Flags, "uses_import_meta") == 3);
 }
 
-/// Total buffer size for the core AST sections plus the semantic sections.
-pub fn bufferSize(
-    tree: *const ast.Tree,
-    sem: *const Semantic,
-    records: Records,
-) usize {
-    const base = transfer.bufferSize(tree);
-    const aligned = std.mem.alignForward(usize, base, 4);
-    return aligned + SUBHEADER_SIZE +
+/// The size of the AST buffer plus the semantic sections.
+pub fn bufferSize(tree: *const ast.Tree, sem: *const Semantic, records: Records) usize {
+    return std.mem.alignForward(usize, transfer.bufferSize(tree), 4) + SUBHEADER_SIZE +
         sem.scopes.list.len * SCOPE_SIZE +
         sem.symbols.len * SYMBOL_SIZE +
         sem.decl_nodes.len * 4 +
@@ -215,7 +209,7 @@ pub fn bufferSize(
         sem.node_scopes.len * 4;
 }
 
-/// Serializes the core AST buffer followed by the semantic sections, returning the bytes written.
+/// Writes the AST buffer and then the semantic sections, returning the bytes written.
 pub fn serializeInto(
     tree: *const ast.Tree,
     sem: *const Semantic,
@@ -223,6 +217,7 @@ pub fn serializeInto(
     buf: []u8,
 ) usize {
     std.debug.assert(buf.len >= bufferSize(tree, sem, records));
+    std.debug.assert(sem.next_bodies.len == sem.scopes.list.len);
 
     const base = transfer.serializeInto(tree, buf);
 
@@ -233,7 +228,7 @@ pub fn serializeInto(
     var pos = std.mem.alignForward(usize, base, 4);
     @memset(buf[base..pos], 0);
 
-    const sub = SubHeader{
+    const sub: SubHeader = .{
         .scope_count = @intCast(sem.scopes.list.len),
         .symbol_count = @intCast(sem.symbols.len),
         .reference_count = @intCast(sem.references.len),
@@ -243,12 +238,10 @@ pub fn serializeInto(
         .node_scope_count = @intCast(sem.node_scopes.len),
         .module_flags = @backingInt(records.flags),
     };
-    @memcpy(buf[pos..][0..SUBHEADER_SIZE], std.mem.asBytes(&sub));
-    pos += SUBHEADER_SIZE;
+    transfer.writeBytes(buf, &pos, std.mem.asBytes(&sub));
 
-    std.debug.assert(sem.next_bodies.len == sem.scopes.list.len);
     for (sem.scopes.list, sem.next_bodies) |scope, next_body| {
-        const entry = PackedScope{
+        const entry: PackedScope = .{
             .node = @backingInt(scope.node),
             .parent = @backingInt(scope.parent),
             .hoist_target = @backingInt(scope.hoist_target),
@@ -256,12 +249,11 @@ pub fn serializeInto(
                 (@as(u32, @intFromBool(scope.flags.strict)) << SCOPE_STRICT_BIT),
             .next_body = @backingInt(next_body),
         };
-        @memcpy(buf[pos..][0..SCOPE_SIZE], std.mem.asBytes(&entry));
-        pos += SCOPE_SIZE;
+        transfer.writeBytes(buf, &pos, std.mem.asBytes(&entry));
     }
 
     for (sem.symbols) |symbol| {
-        const entry = PackedSymbol{
+        const entry: PackedSymbol = .{
             .name_start = symbol.name.start,
             .name_end = symbol.name.end,
             .flags = @backingInt(symbol.flags),
@@ -269,16 +261,13 @@ pub fn serializeInto(
             .decls_start = symbol.decls.start,
             .decls_len = symbol.decls.len,
         };
-        @memcpy(buf[pos..][0..SYMBOL_SIZE], std.mem.asBytes(&entry));
-        pos += SYMBOL_SIZE;
+        transfer.writeBytes(buf, &pos, std.mem.asBytes(&entry));
     }
 
-    const decl_bytes = std.mem.sliceAsBytes(sem.decl_nodes);
-    @memcpy(buf[pos..][0..decl_bytes.len], decl_bytes);
-    pos += decl_bytes.len;
+    transfer.writeBytes(buf, &pos, std.mem.sliceAsBytes(sem.decl_nodes));
 
     for (sem.references) |reference| {
-        const entry = PackedReference{
+        const entry: PackedReference = .{
             .name_start = reference.name.start,
             .name_end = reference.name.end,
             .scope = @backingInt(reference.scope),
@@ -286,8 +275,7 @@ pub fn serializeInto(
             .bits = @backingInt(reference.flags),
             .symbol = @backingInt(reference.symbol),
         };
-        @memcpy(buf[pos..][0..REFERENCE_SIZE], std.mem.asBytes(&entry));
-        pos += REFERENCE_SIZE;
+        transfer.writeBytes(buf, &pos, std.mem.asBytes(&entry));
     }
 
     for (records.imports) |record| {
@@ -297,7 +285,7 @@ pub fn serializeInto(
             bits |= @as(u32, 1) << IMPORT_HAS_PHASE_BIT;
             bits |= @as(u32, @backingInt(phase)) << IMPORT_PHASE_BIT;
         }
-        const entry = PackedImport{
+        const entry: PackedImport = .{
             .symbol = @backingInt(record.symbol),
             .bits = bits,
             .name_start = record.name.start,
@@ -307,12 +295,11 @@ pub fn serializeInto(
             .node = @backingInt(record.node),
             .scope = @backingInt(record.scope),
         };
-        @memcpy(buf[pos..][0..IMPORT_SIZE], std.mem.asBytes(&entry));
-        pos += IMPORT_SIZE;
+        transfer.writeBytes(buf, &pos, std.mem.asBytes(&entry));
     }
 
     for (records.exports) |record| {
-        const entry = PackedExport{
+        const entry: PackedExport = .{
             .bits = @as(u32, @backingInt(record.kind)) |
                 (@as(u32, @intFromBool(record.type_only)) << EXPORT_TYPE_BIT),
             .name_start = record.name.start,
@@ -324,13 +311,10 @@ pub fn serializeInto(
             .specifier_end = record.specifier.end,
             .node = @backingInt(record.node),
         };
-        @memcpy(buf[pos..][0..EXPORT_SIZE], std.mem.asBytes(&entry));
-        pos += EXPORT_SIZE;
+        transfer.writeBytes(buf, &pos, std.mem.asBytes(&entry));
     }
 
-    const node_scope_bytes = std.mem.sliceAsBytes(sem.node_scopes);
-    @memcpy(buf[pos..][0..node_scope_bytes.len], node_scope_bytes);
-    pos += node_scope_bytes.len;
+    transfer.writeBytes(buf, &pos, std.mem.sliceAsBytes(sem.node_scopes));
 
     std.debug.assert(pos == bufferSize(tree, sem, records));
     return pos;

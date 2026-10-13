@@ -27,48 +27,41 @@ pub fn isStartOfTsDeclaration(parser: *Parser) bool {
     var peek = parser.beginPeek();
     defer peek.end();
 
-    var cur = parser.current_token;
+    var token = parser.current_token;
     var has_declare = false;
     var has_abstract = false;
 
-    if (cur.tag == .declare) {
-        cur = peek.next();
-        if (cur.hasLineTerminatorBefore()) return false;
+    if (token.tag == .declare) {
+        token = peek.next();
+        if (token.hasLineTerminatorBefore()) return false;
         has_declare = true;
     }
 
-    if (cur.tag == .abstract) {
-        const next = peek.next();
-        if (next.hasLineTerminatorBefore()) return false;
-        if (next.tag != .class) return false;
-        cur = next;
+    if (token.tag == .abstract) {
+        token = peek.next();
+        if (token.hasLineTerminatorBefore()) return false;
+        if (token.tag != .class) return false;
         has_abstract = true;
     }
 
-    switch (cur.tag) {
+    switch (token.tag) {
         .@"const" => return has_declare or isConstEnumHead(peek.next()),
         .@"enum" => return true,
-        .type, .interface, .namespace => {
-            const name = peek.next();
-            return isDeclarationName(name);
-        },
+        .type, .interface, .namespace => return isDeclarationName(peek.next()),
         .module => {
             const name = peek.next();
             if (name.hasLineTerminatorBefore()) return false;
             return isDeclarationName(name) or name.tag == .string_literal;
         },
-        .global => {
-            const next = peek.next();
-            return next.tag == .left_brace;
-        },
+        .global => return peek.next().tag == .left_brace,
         .class => return has_declare or has_abstract,
         .function, .@"var", .let => return has_declare,
         .async => {
             if (!has_declare) return false;
-            const fn_token = peek.next();
-            if (fn_token.tag != .function or fn_token.hasLineTerminatorBefore()) return false;
-            const name = peek.next();
-            return isDeclarationName(name);
+            const function_token = peek.next();
+            if (function_token.tag != .function) return false;
+            if (function_token.hasLineTerminatorBefore()) return false;
+            return isDeclarationName(peek.next());
         },
         .import => {
             if (!has_declare) return false;
@@ -93,62 +86,59 @@ fn isDeclarationName(token: Token) bool {
 
 pub fn parseTsDeclaration(parser: *Parser) Error!?ast.NodeIndex {
     const start = parser.current_token.span.start;
-    var mods: Modifiers = .{};
+    var modifiers: Modifiers = .{};
 
     if (parser.current_token.tag == .declare) {
-        mods.declare = true;
+        modifiers.declare = true;
         try parser.advance() orelse return null;
     }
     if (parser.current_token.tag == .abstract) {
-        mods.abstract = true;
+        modifiers.abstract = true;
         try parser.advance() orelse return null;
     }
     if (parser.current_token.tag == .@"const") {
-        const next = parser.peekAhead();
-        if (isConstEnumHead(next)) {
-            mods.is_const = true;
+        if (isConstEnumHead(parser.peekAhead())) {
+            modifiers.is_const = true;
             try parser.advance() orelse return null;
         }
     }
 
     const saved_ambient = parser.ts_context.ambient;
     defer parser.ts_context.ambient = saved_ambient;
-    if (mods.declare) parser.ts_context.ambient = true;
+    if (modifiers.declare) parser.ts_context.ambient = true;
 
     return switch (parser.current_token.tag) {
-        .type => parseTypeAliasDeclaration(parser, mods, start),
-        .interface => parseInterfaceDeclaration(parser, mods, start),
-        .@"enum" => parseEnumDeclaration(parser, mods, start),
-        .namespace => parseModuleDeclaration(parser, mods, start, .namespace),
-        .module => parseModuleDeclaration(parser, mods, start, .module),
-        .global => parseGlobalDeclaration(parser, mods, start),
+        .type => parseTypeAliasDeclaration(parser, modifiers, start),
+        .interface => parseInterfaceDeclaration(parser, modifiers, start),
+        .@"enum" => parseEnumDeclaration(parser, modifiers, start),
+        .namespace => parseModuleDeclaration(parser, modifiers, start, .namespace),
+        .module => parseModuleDeclaration(parser, modifiers, start, .module),
+        .global => parseGlobalDeclaration(parser, modifiers, start),
         .@"var", .let, .@"const" => variables.parseVariableDeclaration(
             parser,
-            .{ .is_declare = mods.declare },
+            .{ .is_declare = modifiers.declare },
             start,
         ),
-        .function => functions.parseFunction(parser, .{ .is_declare = mods.declare }, start),
+        .function => functions.parseFunction(parser, .{ .is_declare = modifiers.declare }, start),
         .async => blk: {
             try parser.advance() orelse break :blk null;
             break :blk functions.parseFunction(
                 parser,
-                .{ .is_declare = mods.declare, .is_async = true },
+                .{ .is_declare = modifiers.declare, .is_async = true },
                 start,
             );
         },
         .class => class.parseClass(
             parser,
-            .{ .is_declare = mods.declare, .is_abstract = mods.abstract },
+            .{ .is_declare = modifiers.declare, .is_abstract = modifiers.abstract },
             start,
         ),
-        .import => parseDeclareImportEquals(parser, start),
+        .import => blk: {
+            try parser.advance() orelse break :blk null;
+            break :blk parseImportEqualsBody(parser, start, .value);
+        },
         else => unreachable,
     };
-}
-
-fn parseDeclareImportEquals(parser: *Parser, start: u32) Error!?ast.NodeIndex {
-    try parser.advance() orelse return null;
-    return parseImportEqualsBody(parser, start, .value);
 }
 
 // caller already consumed `import`
@@ -221,7 +211,7 @@ fn parseExternalModuleReference(parser: *Parser) Error!?ast.NodeIndex {
 
 fn parseTypeAliasDeclaration(
     parser: *Parser,
-    mods: Modifiers,
+    modifiers: Modifiers,
     start: u32,
 ) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .type);
@@ -244,7 +234,7 @@ fn parseTypeAliasDeclaration(
             .id = id,
             .type_parameters = type_parameters,
             .type_annotation = type_annotation,
-            .declare = mods.declare,
+            .declare = modifiers.declare,
         } },
         .{ .start = start, .end = end },
     );
@@ -252,7 +242,7 @@ fn parseTypeAliasDeclaration(
 
 pub fn parseInterfaceDeclaration(
     parser: *Parser,
-    mods: Modifiers,
+    modifiers: Modifiers,
     start: u32,
 ) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .interface);
@@ -269,7 +259,7 @@ pub fn parseInterfaceDeclaration(
             .type_parameters = type_parameters,
             .extends = extends,
             .body = body,
-            .declare = mods.declare,
+            .declare = modifiers.declare,
         } },
         .{ .start = start, .end = parser.prev_token_end },
     );
@@ -353,7 +343,7 @@ fn parseHeritageExpression(parser: *Parser) Error!?ast.NodeIndex {
     return expression;
 }
 
-fn parseEnumDeclaration(parser: *Parser, mods: Modifiers, start: u32) Error!?ast.NodeIndex {
+fn parseEnumDeclaration(parser: *Parser, modifiers: Modifiers, start: u32) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .@"enum");
     try parser.advance() orelse return null;
 
@@ -364,8 +354,8 @@ fn parseEnumDeclaration(parser: *Parser, mods: Modifiers, start: u32) Error!?ast
         .{ .ts_enum_declaration = .{
             .id = id,
             .body = body,
-            .is_const = mods.is_const,
-            .declare = mods.declare,
+            .is_const = modifiers.is_const,
+            .declare = modifiers.declare,
         } },
         .{ .start = start, .end = parser.prev_token_end },
     );
@@ -402,7 +392,6 @@ fn parseEnumBody(parser: *Parser) Error!?ast.NodeIndex {
     )) return null;
 
     const members = try parser.flushToExtras(&parser.scratch_a, checkpoint);
-
     return try parser.tree.addNode(
         .{ .ts_enum_body = .{ .members = members } },
         .{ .start = start, .end = parser.prev_token_end },
@@ -503,7 +492,7 @@ fn parseInterfaceBody(parser: *Parser) Error!?ast.NodeIndex {
 // namespace Foo { ... }    namespace A.B.C { ... }    module "./m" { ... }
 fn parseModuleDeclaration(
     parser: *Parser,
-    mods: Modifiers,
+    modifiers: Modifiers,
     start: u32,
     kind: ast.TSModuleDeclarationKind,
 ) Error!?ast.NodeIndex {
@@ -541,13 +530,13 @@ fn parseModuleDeclaration(
             .id = id,
             .body = body,
             .kind = kind,
-            .declare = mods.declare,
+            .declare = modifiers.declare,
         } },
         .{ .start = start, .end = end },
     );
 }
 
-fn parseGlobalDeclaration(parser: *Parser, mods: Modifiers, start: u32) Error!?ast.NodeIndex {
+fn parseGlobalDeclaration(parser: *Parser, modifiers: Modifiers, start: u32) Error!?ast.NodeIndex {
     std.debug.assert(parser.current_token.tag == .global);
 
     const id = try literals.parseIdentifierName(parser) orelse return null;
@@ -557,7 +546,7 @@ fn parseGlobalDeclaration(parser: *Parser, mods: Modifiers, start: u32) Error!?a
         .{ .ts_global_declaration = .{
             .id = id,
             .body = body,
-            .declare = mods.declare,
+            .declare = modifiers.declare,
         } },
         .{ .start = start, .end = parser.prev_token_end },
     );
@@ -578,7 +567,6 @@ fn parseModuleBlock(parser: *Parser) Error!?ast.NodeIndex {
     )) return null;
 
     const body = try parser.parseBody(.right_brace, .module_block);
-
     const end = parser.current_token.span.end;
     if (!try parser.expect(
         .right_brace,

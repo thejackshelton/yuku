@@ -76,7 +76,6 @@ pub const Output = struct {
     }
 
     pub inline fn writeStr(self: *Output, s: []const u8) Error!void {
-        if (s.len == 0) return;
         try self.writeText(s, .token);
     }
 
@@ -85,12 +84,10 @@ pub const Output = struct {
     }
 
     pub inline fn writeRawStr(self: *Output, s: []const u8) Error!void {
-        if (s.len == 0) return;
         try self.writeText(s, .literal);
     }
 
     pub inline fn writeComment(self: *Output, s: []const u8) Error!void {
-        if (s.len == 0) return;
         try self.writeText(s, .comment);
     }
 
@@ -130,7 +127,7 @@ pub const Output = struct {
     }
 
     inline fn writeText(self: *Output, s: []const u8, comptime kind: Text) Error!void {
-        std.debug.assert(s.len > 0);
+        if (s.len == 0) return;
         if (kind == .token) self.dropHeldSpace(s[0]);
         var end = s.len;
         while (end > 0 and s[end - 1] == ' ') end -= 1;

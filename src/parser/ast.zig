@@ -14,6 +14,7 @@ pub const Token = @import("token.zig").Token;
 pub const TokenTag = @import("token.zig").TokenTag;
 pub const TokenFlag = @import("token.zig").TokenFlag;
 pub const TokenMask = @import("token.zig").Mask;
+pub const Precedence = @import("token.zig").Precedence;
 
 pub const Severity = enum {
     @"error",
@@ -22,12 +23,7 @@ pub const Severity = enum {
     info,
 
     pub fn toString(self: Severity) []const u8 {
-        return switch (self) {
-            .@"error" => "error",
-            .warning => "warning",
-            .hint => "hint",
-            .info => "info",
-        };
+        return @tagName(self);
     }
 };
 
@@ -54,11 +50,7 @@ pub const SourceType = enum {
     commonjs,
 
     pub fn toString(self: SourceType) []const u8 {
-        return switch (self) {
-            .script => "script",
-            .module => "module",
-            .commonjs => "commonjs",
-        };
+        return @tagName(self);
     }
 
     /// Returns `.commonjs` for `.cjs` and `.cts` paths and `.module` otherwise.
@@ -66,7 +58,6 @@ pub const SourceType = enum {
         if (std.mem.endsWith(u8, path, ".cjs") or std.mem.endsWith(u8, path, ".cts")) {
             return .commonjs;
         }
-
         return .module;
     }
 };
@@ -79,9 +70,7 @@ pub const Lang = enum {
     tsx,
     dts,
 
-    /// Resolves `.d.ts`, `.d.mts`, and `.d.cts` to `dts`, `.tsx` to `tsx`,
-    /// `.ts`, `.mts`, and `.cts` to `ts`, `.jsx` to `jsx`, and anything else
-    /// to `js`.
+    /// Infers the language from a file extension, `js` for any unknown one.
     pub fn fromPath(path: []const u8) Lang {
         if (std.mem.endsWith(u8, path, ".d.ts") or
             std.mem.endsWith(u8, path, ".d.mts") or
@@ -89,15 +78,11 @@ pub const Lang = enum {
         {
             return .dts;
         }
-
         if (std.mem.endsWith(u8, path, ".tsx")) return .tsx;
-
         if (std.mem.endsWith(u8, path, ".ts") or
             std.mem.endsWith(u8, path, ".mts") or
             std.mem.endsWith(u8, path, ".cts")) return .ts;
-
         if (std.mem.endsWith(u8, path, ".jsx")) return .jsx;
-
         return .js;
     }
 };
@@ -139,11 +124,7 @@ pub const AttachedComment = struct {
         inside,
 
         pub fn toString(self: Position) []const u8 {
-            return switch (self) {
-                .before => "before",
-                .after => "after",
-                .inside => "inside",
-            };
+            return @tagName(self);
         }
     };
 };
@@ -315,16 +296,6 @@ pub const Tree = struct {
         return .{ .start = start, .len = @intCast(children.len) };
     }
 
-    /// Reserves room for `entries` more strings totalling at most `bytes`,
-    /// ahead of bulk `addString()` calls.
-    pub fn ensureUnusedStringCapacity(
-        self: *Tree,
-        bytes: u32,
-        entries: u32,
-    ) error{OutOfMemory}!void {
-        return self.strings.ensureUnusedCapacity(self.arena.allocator(), bytes, entries);
-    }
-
     /// Returns a `String` for a range of the source text.
     pub inline fn sourceSlice(self: *const Tree, start: u32, end: u32) String {
         return self.strings.sourceSlice(start, end);
@@ -430,12 +401,7 @@ pub const MethodDefinitionKind = enum {
     set,
 
     pub fn toString(self: MethodDefinitionKind) []const u8 {
-        return switch (self) {
-            .constructor => "constructor",
-            .method => "method",
-            .get => "get",
-            .set => "set",
-        };
+        return @tagName(self);
     }
 };
 
@@ -516,32 +482,32 @@ fn operatorText(comptime Operator: type, operator: Operator) []const u8 {
 
 /// Operator of a `binary_expression`.
 pub const BinaryOperator = enum {
-    equal, // ==
-    not_equal, // !=
-    strict_equal, // ===
-    strict_not_equal, // !==
+    equal,
+    not_equal,
+    strict_equal,
+    strict_not_equal,
 
-    less_than, // <
-    less_than_or_equal, // <=
-    greater_than, // >
-    greater_than_or_equal, // >=
+    less_than,
+    less_than_or_equal,
+    greater_than,
+    greater_than_or_equal,
 
-    add, // +
-    subtract, // -
-    multiply, // *
-    divide, // /
-    modulo, // %
-    exponent, // **
+    add,
+    subtract,
+    multiply,
+    divide,
+    modulo,
+    exponent,
 
-    bitwise_or, // |
-    bitwise_xor, // ^
-    bitwise_and, // &
-    left_shift, // <<
-    right_shift, // >>
-    unsigned_right_shift, // >>>
+    bitwise_or,
+    bitwise_xor,
+    bitwise_and,
+    left_shift,
+    right_shift,
+    unsigned_right_shift,
 
-    in, // in
-    instanceof, // instanceof
+    in,
+    instanceof,
 
     pub fn fromToken(token: TokenTag) BinaryOperator {
         return switch (token) {
@@ -614,9 +580,9 @@ pub const BinaryExpression = struct {
 
 /// Operator of a `logical_expression`.
 pub const LogicalOperator = enum {
-    @"and", // &&
-    @"or", // ||
-    nullish_coalescing, // ??
+    @"and",
+    @"or",
+    nullish_coalescing,
 
     pub fn fromToken(token: TokenTag) LogicalOperator {
         return switch (token) {
@@ -661,13 +627,13 @@ pub const ConditionalExpression = struct {
 
 /// Operator of a `unary_expression`.
 pub const UnaryOperator = enum {
-    negate, // -
-    positive, // +
-    logical_not, // !
-    bitwise_not, // ~
-    typeof, // typeof
-    void, // void
-    delete, // delete
+    negate,
+    positive,
+    logical_not,
+    bitwise_not,
+    typeof,
+    void,
+    delete,
 
     pub fn fromToken(token: TokenTag) UnaryOperator {
         return switch (token) {
@@ -708,8 +674,8 @@ pub const UnaryExpression = struct {
 
 /// Operator of an `update_expression`.
 pub const UpdateOperator = enum {
-    increment, // ++
-    decrement, // --
+    increment,
+    decrement,
 
     pub fn fromToken(token: TokenTag) UpdateOperator {
         return switch (token) {
@@ -741,22 +707,22 @@ pub const UpdateExpression = struct {
 
 /// Operator of an `assignment_expression`.
 pub const AssignmentOperator = enum {
-    assign, // =
-    add_assign, // +=
-    subtract_assign, // -=
-    multiply_assign, // *=
-    divide_assign, // /=
-    modulo_assign, // %=
-    exponent_assign, // **=
-    left_shift_assign, // <<=
-    right_shift_assign, // >>=
-    unsigned_right_shift_assign, // >>>=
-    bitwise_or_assign, // |=
-    bitwise_xor_assign, // ^=
-    bitwise_and_assign, // &=
-    logical_or_assign, // ||=
-    logical_and_assign, // &&=
-    nullish_assign, // ??=
+    assign,
+    add_assign,
+    subtract_assign,
+    multiply_assign,
+    divide_assign,
+    modulo_assign,
+    exponent_assign,
+    left_shift_assign,
+    right_shift_assign,
+    unsigned_right_shift_assign,
+    bitwise_or_assign,
+    bitwise_xor_assign,
+    bitwise_and_assign,
+    logical_or_assign,
+    logical_and_assign,
+    nullish_assign,
 
     pub fn fromToken(token: TokenTag) AssignmentOperator {
         return switch (token) {
@@ -1012,7 +978,6 @@ pub const NumericLiteral = struct {
     /// Computes the IEEE 754 double value.
     pub fn value(self: NumericLiteral, tree: *const Tree) f64 {
         const raw = tree.string(self.raw);
-        if (raw.len == 0) return 0;
         var buf: [128]u8 = undefined;
         var len: usize = 0;
         for (raw) |c| {
@@ -1222,11 +1187,7 @@ pub const PropertyKind = enum {
     set,
 
     pub fn toString(self: PropertyKind) []const u8 {
-        return switch (self) {
-            .init => "init",
-            .get => "get",
-            .set => "set",
-        };
+        return @tagName(self);
     }
 };
 
@@ -1448,10 +1409,7 @@ pub const ImportOrExportKind = enum {
     type,
 
     pub fn toString(self: ImportOrExportKind) []const u8 {
-        return switch (self) {
-            .value => "value",
-            .type => "type",
-        };
+        return @tagName(self);
     }
 };
 
@@ -1788,11 +1746,7 @@ pub const TSTypeOperatorKind = enum {
     readonly,
 
     pub fn toString(self: TSTypeOperatorKind) []const u8 {
-        return switch (self) {
-            .keyof => "keyof",
-            .unique => "unique",
-            .readonly => "readonly",
-        };
+        return @tagName(self);
     }
 };
 
@@ -1891,11 +1845,7 @@ pub const TSMethodSignatureKind = enum(u2) {
     set,
 
     pub fn toString(self: TSMethodSignatureKind) []const u8 {
-        return switch (self) {
-            .method => "method",
-            .get => "get",
-            .set => "set",
-        };
+        return @tagName(self);
     }
 };
 
@@ -2028,10 +1978,7 @@ pub const TSModuleDeclarationKind = enum(u1) {
     module,
 
     pub fn toString(self: TSModuleDeclarationKind) []const u8 {
-        return switch (self) {
-            .namespace => "namespace",
-            .module => "module",
-        };
+        return @tagName(self);
     }
 };
 
@@ -2249,6 +2196,14 @@ pub const JSXSpreadChild = struct {
     expression: NodeIndex,
 };
 
+/// A node of the dialect compiled into the parser, see
+/// [Dialects](https://yuku.fyi/parser/dialect/).
+pub const Dialect = struct {
+    kind: @import("dialect.zig").Kind,
+    /// In source order, `.null` for an absent part.
+    children: IndexRange,
+};
+
 pub const NodeData = union(enum) {
     sequence_expression: SequenceExpression,
     parenthesized_expression: ParenthesizedExpression,
@@ -2423,6 +2378,8 @@ pub const NodeData = union(enum) {
     jsx_empty_expression: JSXEmptyExpression,
     jsx_text: JSXText,
     jsx_spread_child: JSXSpreadChild,
+
+    dialect: Dialect,
 
     /// True when the node produces a value at runtime. For `function` and
     /// `class`, only the expression forms count.

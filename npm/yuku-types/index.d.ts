@@ -1,12 +1,12 @@
 import type { TokenKindMap } from "./tokens.js";
 
-/** How the source code should be parsed. */
+/** How the source is parsed. */
 type SourceType = "script" | "module" | "commonjs";
 
-/** What a `Program` node reports, per ESTree. `commonjs` input parses as `script`. */
+/** What `Program.sourceType` reports, per ESTree. `commonjs` input reports `script`. */
 type ModuleKind = "script" | "module";
 
-/** Language variant of the source code. */
+/** The language of the source. */
 type SourceLang = "js" | "ts" | "jsx" | "tsx" | "dts";
 
 /** How a file is read, shared by every package that takes source text. */
@@ -16,78 +16,64 @@ interface FileOptions {
   /** @default "js", or from `path` */
   lang?: SourceLang;
   /**
-   * `"module"` is strict, with `import` and `export`. `"commonjs"` is a script whose top level is
-   * a function body, allowing `return`. `Program.sourceType` is `"script"` or `"module"`, per
-   * ESTree.
+   * `"module"` is strict and allows `import` and `export`. `"commonjs"` is a script whose top
+   * level is a function body, so it allows `return`.
    * @default "module", or "commonjs" for `.cjs` and `.cts` paths
    */
   sourceType?: SourceType;
+  /**
+   * Parses with the dialect compiled into the WebAssembly module. The published module has none.
+   * See https://yuku.fyi/parser/dialect/#javascript.
+   * @default false
+   */
+  dialect?: boolean;
 }
 
-/**
- * Yuku's compiled code, which the packages call to parse and analyze. `load` from `yuku-core`
- * loads the native core, and `load` from `@yuku-core/wasm` the WebAssembly core.
- */
-interface Core {
-  /** Returns the buffer `yuku-parser` decodes. */
-  parse(source: string, options: object): ArrayBuffer;
-  /** Returns the buffer `yuku-analyzer` decodes. */
-  analyze(source: string, options: object): ArrayBuffer;
-}
-
-/** Whether a comment came from a line or block source comment. */
+/** Whether a comment is a line or a block comment. */
 type CommentType = "Line" | "Block";
 
-/**
- * A source comment in the flat {@link ParseResult.comments} list, carrying its
- * source span.
- */
+/** A comment in the flat `comments` list of a parse result. */
 interface Comment {
   type: CommentType;
-  /** Comment text without the delimiters. */
+  /** Text without the delimiters. */
   value: string;
-  /** UTF-16 offset of the comment start (delimiter included). */
+  /** UTF-16 offset. The span includes the delimiters. */
   start: number;
-  /** UTF-16 offset of the comment end (delimiter included). */
+  /** UTF-16 offset. */
   end: number;
 }
 
 /**
- * Position of an {@link AttachedComment} relative to its host node.
- *
- * - `before`: leading the host.
- * - `after`: trailing the host.
- * - `inside`: interior to an otherwise empty host.
+ * Where an {@link AttachedComment} sits relative to its host node. `inside` means within an
+ * otherwise empty host.
  */
 type CommentPosition = "before" | "after" | "inside";
 
-/**
- * A comment attached to a single host AST node, via {@link BaseNode.comments}.
- *
- * `sameLine` is true when the comment shares a source line with the
- * host's adjacent edge (host's start for `before`, host's end for
- * `after`). For `inside` it is always `false`.
- */
+/** A comment attached to a host node through {@link BaseNode.comments}. */
 interface AttachedComment {
   type: CommentType;
   position: CommentPosition;
+  /**
+   * The comment shares a line with the nearest edge of its host, the start for `before` and the
+   * end for `after`. Always false for `inside`.
+   */
   sameLine: boolean;
-  /** Comment text without the delimiters. */
+  /** Text without the delimiters. */
   value: string;
 }
 
-/** The kind of a token, one of the values of `TokenKind`. */
+/** One of the values of the `TokenKind` object. */
 type TokenKind = TokenKindMap[keyof TokenKindMap];
 
 /**
- * The tokens of a file in source order, read on demand from the parser's
- * token table. A token is an index below `length`. Comments are not tokens.
+ * The tokens of a file in source order, read on demand from the parser's token table. A token is
+ * an index below `length`. Comments are not tokens.
  */
 interface TokenList {
   readonly length: number;
   /** `tokens.kind(i) === TokenKind.Arrow` */
   kind(index: number): TokenKind;
-  /** Source text, a string literal keeps its quotes. */
+  /** Source text. A string literal keeps its quotes. */
   text(index: number): string;
   /** UTF-16 offset, like nodes. */
   start(index: number): number;
@@ -111,7 +97,7 @@ interface TokenList {
   /** Operator precedence, 0 when none. */
   precedence(index: number): number;
 
-  /** A line terminator precedes the token, what ASI looks at. */
+  /** A line terminator precedes the token, the condition ASI checks. */
   newlineBefore(index: number): boolean;
   /** The text has an escape sequence. */
   escaped(index: number): boolean;
@@ -121,8 +107,8 @@ interface TokenList {
   loneSurrogate(index: number): boolean;
 
   /**
-   * The half-open index range of the tokens inside a node's span. A node that
-   * sits inside one token, such as a template element, has an empty range.
+   * The half-open index range of the tokens inside a node. A node within a single token, such as
+   * a template element, has an empty range.
    */
   range(node: Span): [from: number, to: number];
   /** The first token inside a node, or -1. */
@@ -165,30 +151,35 @@ interface Diagnostic {
   help: string | null;
 }
 
-/** Discriminant `type` string of every AST node. */
+/** The `type` of every node. */
 type NodeType = Node["type"];
+
+/** The `type` of every node except dialect nodes. */
+type StandardNodeType = Exclude<NodeType, keyof DialectNodes>;
+
+/**
+ * The nodes of the dialect compiled into the WebAssembly module, by `type`. A dialect's package
+ * declares them here through module augmentation, which adds them to `Node`.
+ */
+export interface DialectNodes {}
 
 /** The node, or union of nodes, carrying a given `type`. */
 type NodeOfType<K extends NodeType> = Extract<Node, { type: K }>;
 
 /**
- * The walk context: one reused object exposing the current position and
- * the tree mutation operations. Valid only during the visit that
- * receives it; do not store it.
+ * The position of a walk and the operations that change the tree. One object is reused for every
+ * visit, so it is valid only during the visit that receives it.
  */
 declare class WalkContext<T extends Node = Node, S = unknown> {
   /** The node being visited. */
   readonly node: T;
   /** The node that holds {@link node}, or null at the walk root. */
   readonly parent: Node | null;
-  /**
-   * The field on {@link parent} holding {@link node} (or its array),
-   * or null at the walk root.
-   */
+  /** The field of {@link parent} holding {@link node} or its array, or null at the walk root. */
   readonly key: string | null;
   /** Index within an array field, or null in a plain field. */
   readonly index: number | null;
-  /** State threaded through the walk (the third {@link walk} argument). */
+  /** State threaded through the walk, the third argument of `walk`. */
   state: S;
   /** Ancestors from the walk root down to {@link parent}. */
   ancestors(): Node[];
@@ -197,38 +188,26 @@ declare class WalkContext<T extends Node = Node, S = unknown> {
   /** Stop the walk entirely. */
   stop(): void;
   /**
-   * Replace the current node. The walk continues into the replacement's
-   * children, and `leave` fires for the replacement's type. A synthetic
-   * node with `start === 0 && end === 0` inherits the original span,
-   * for source maps. Throws at the walk root.
+   * Replace the current node. The walk continues into the replacement's children, and `leave`
+   * fires for the replacement's type. A synthetic node with `start === 0 && end === 0` inherits
+   * the original span, for source maps. Throws at the walk root.
    */
   replace(node: Node): void;
   /**
-   * Remove the current node from its parent: spliced from array fields,
-   * nulled in plain fields. Children are not walked and `leave` does
-   * not fire. Throws at the walk root.
+   * Remove the current node, splicing it from an array field or nulling a plain field. Its
+   * children are not walked and `leave` does not fire. Throws at the walk root.
    */
   remove(): void;
-  /**
-   * Insert a sibling before the current node. The inserted node is NOT
-   * visited. Only valid inside an array field.
-   */
+  /** Insert an unvisited sibling before the current node. Only valid in an array field. */
   insertBefore(node: Node): void;
-  /**
-   * Insert a sibling after the current node. The inserted node IS
-   * visited. Only valid inside an array field.
-   */
+  /** Insert a sibling after the current node, visited in turn. Only valid in an array field. */
   insertAfter(node: Node): void;
 }
-// AST node types
 
 interface BaseNode {
   start: number;
   end: number;
-  /**
-   * Comments attached to this node in source order. Present only when
-   * {@link ParseOptions.attachComments} is true.
-   */
+  /** Comments attached to this node in source order, present only with `attachComments`. */
   comments?: AttachedComment[];
 }
 
@@ -1160,8 +1139,6 @@ type JSXTagName = JSXElementName;
 
 type JSXChild = JSXText | JSXElement | JSXFragment | JSXExpressionContainer | JSXSpreadChild;
 
-// TypeScript types
-
 interface TSTypeAnnotation extends BaseNode {
   type: "TSTypeAnnotation";
   typeAnnotation: TSType;
@@ -1656,11 +1633,9 @@ interface Program extends BaseNode {
 }
 
 /**
- * An element of `Program.body` or `TSModuleBlock.body`. Unlike {@link Statement},
- * this also includes {@link ModuleDeclaration} (`import`/`export`) and
- * {@link Directive}, which are never valid in nested statement positions such
- * as a loop or `if` body. Directives also open a function body, so
- * `BlockStatement.body` holds them too.
+ * An element of `Program.body` or `TSModuleBlock.body`. Unlike {@link Statement}, it includes
+ * module declarations and directives, which a nested position such as a loop body never holds.
+ * `BlockStatement.body` holds directives too, since they open a function body.
  */
 type ProgramStatement = Statement | ModuleDeclaration | Directive;
 
@@ -1787,6 +1762,7 @@ type Node =
   | JSXEmptyExpression
   | JSXText
   | JSXSpreadChild
+  | DialectNodes[keyof DialectNodes]
   | TSTypeAnnotation
   | TSType
   | TSTypeParameter
@@ -1816,6 +1792,7 @@ export type {
   TokenList,
   NodeOfType,
   NodeType,
+  StandardNodeType,
   Comment,
   AttachedComment,
   CommentType,
@@ -1823,7 +1800,6 @@ export type {
   Diagnostic,
   DiagnosticLabel,
   DiagnosticSeverity,
-  Core,
   FileOptions,
   SourceType,
   ModuleKind,

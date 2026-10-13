@@ -5,6 +5,7 @@ const ast = @import("../ast.zig");
 const output = @import("output.zig");
 const sourcemap = @import("sourcemap.zig");
 const utils = @import("utils.zig");
+const dialect = @import("../dialect.zig");
 
 const source_maps = @import("codegen_options").source_maps;
 
@@ -14,7 +15,7 @@ const Tree = ast.Tree;
 const NodeIndex = ast.NodeIndex;
 const NodeData = ast.NodeData;
 const IndexRange = ast.IndexRange;
-const Precedence = @import("../token.zig").Precedence;
+const Precedence = ast.Precedence;
 
 pub const SourceMap = sourcemap.SourceMap;
 pub const SourceMapOptions = sourcemap.Options;
@@ -57,6 +58,34 @@ pub const Result = struct {
 };
 
 pub const Error = error{OutOfMemory};
+
+/// The printer as a dialect's `print` drives it.
+pub const DialectPrinter = struct {
+    inner: *Printer,
+
+    pub inline fn tree(self: *const DialectPrinter) *const Tree {
+        return self.inner.tree;
+    }
+
+    /// Writes code, spaced from the code before it where the two would merge.
+    pub inline fn write(self: *const DialectPrinter, code: []const u8) Error!void {
+        try self.inner.out.writeStr(code);
+    }
+
+    /// Writes a space in the pretty format.
+    pub inline fn space(self: *const DialectPrinter) Error!void {
+        try self.inner.out.space();
+    }
+
+    pub inline fn node(self: *const DialectPrinter, index: NodeIndex) Error!void {
+        try self.inner.emit(index);
+    }
+
+    /// Prints `items` as a braced block of statements.
+    pub inline fn block(self: *const DialectPrinter, items: []const NodeIndex) Error!void {
+        try self.inner.printBlock(items, false);
+    }
+};
 
 pub fn generate(allocator: Allocator, tree: *Tree, options: Options) Error!Result {
     std.debug.assert(tree.root != .null);
@@ -167,9 +196,14 @@ const Printer = struct {
         try self.out.writeStr(self.tree.string(id));
     }
 
-    inline fn printEq(self: *Self) Error!void {
+    inline fn printSpaced(self: *Self, byte: u8) Error!void {
         try self.out.space();
-        try self.out.writeByte('=');
+        try self.out.writeByte(byte);
+        try self.out.space();
+    }
+
+    inline fn printColon(self: *Self) Error!void {
+        try self.out.writeByte(':');
         try self.out.space();
     }
 
@@ -235,14 +269,21 @@ const Printer = struct {
     }
 
     fn emitStmt(self: *Self, idx: NodeIndex) Error!void {
-        if (self.options.strip and self.stripsToNothing(idx)) {
-            try self.emitNothing(idx);
+        if (try self.skipStripped(idx)) {
             try self.out.writeByte(';');
         } else {
             try self.emit(idx);
         }
     }
 
+    inline fn skipStripped(self: *Self, idx: NodeIndex) Error!bool {
+        if (!self.options.strip) return false;
+        if (!self.stripsToNothing(idx)) return false;
+        try self.emitNothing(idx);
+        return true;
+    }
+
+    // a node strip removes still walks, for its diagnostics
     fn emitNothing(self: *Self, idx: NodeIndex) Error!void {
         std.debug.assert(self.stripsToNothing(idx));
         const written = self.out.len();
@@ -490,7 +531,8 @@ const Printer = struct {
                 });
                 opened = true;
             }
-            cast = strippedOperand(self.tree, cast);
+            const data = self.nodeData(cast);
+            cast = castOperand(data) orelse data.ts_parameter_property.parameter;
         }
         unreachable;
     }
@@ -786,14 +828,8 @@ const Printer = struct {
     inline fn stripped(self: *const Self, idx: NodeIndex) NodeIndex {
         if (!self.options.strip) return idx;
         var i = idx;
-        while (true) i = switch (self.nodeData(i)) {
-            .ts_as_expression => |e| e.expression,
-            .ts_satisfies_expression => |e| e.expression,
-            .ts_non_null_expression => |e| e.expression,
-            .ts_instantiation_expression => |e| e.expression,
-            .ts_type_assertion => |e| e.expression,
-            else => return i,
-        };
+        while (castOperand(self.nodeData(i))) |operand| i = operand;
+        return i;
     }
 
     inline fn emitNode(self: *Self, idx: NodeIndex, ctx: Ctx) Error!void {
@@ -803,6 +839,9 @@ const Printer = struct {
         switch (self.node_data[@backingInt(idx)]) {
             // out of line, so the recursion's frame holds only what every node needs
             inline else => |*node, tag| {
+                if (comptime tag == .dialect) {
+                    return @call(.never_inline, emitDialect, .{ self, node, idx });
+                }
                 if (comptime isChainLink(tag)) {
                     return @call(.never_inline, emitLink, .{ self, tag, node, ctx });
                 }
@@ -952,19 +991,16 @@ const Printer = struct {
             try self.out.writeRawStr(self.tree.string(h.value));
             try self.out.writeByte('\n');
         }
-        try self.printStmtList(p.body, true);
+        try self.printStmtList(self.tree.extra(p.body), true);
         self.pending_semi = false;
         if (self.options.comments != .none) try self.emitInsideComments(self.current_idx);
     }
 
-    fn printStmtList(self: *Self, items: IndexRange, prologue: bool) Error!void {
+    fn printStmtList(self: *Self, items: []const NodeIndex, prologue: bool) Error!void {
         var first = true;
         var prol = prologue;
-        for (self.tree.extra(items)) |s| {
-            if (self.options.strip and self.stripsToNothing(s)) {
-                try self.emitNothing(s);
-                continue;
-            }
+        for (items) |s| {
+            if (try self.skipStripped(s)) continue;
             if (!first) try self.newline();
             try self.flushSemi();
             self.in_prologue = prol;
@@ -975,7 +1011,7 @@ const Printer = struct {
         self.in_prologue = false;
     }
 
-    fn printIndentedStmtList(self: *Self, items: IndexRange, prologue: bool) Error!bool {
+    fn printIndentedStmtList(self: *Self, items: []const NodeIndex, prologue: bool) Error!bool {
         std.debug.assert(items.len > 0);
         const prints = !self.options.strip or self.anyPrints(items);
         self.indent_depth += 1;
@@ -985,12 +1021,12 @@ const Printer = struct {
         return prints;
     }
 
-    fn anyPrints(self: *const Self, items: IndexRange) bool {
-        for (self.tree.extra(items)) |s| if (!self.stripsToNothing(s)) return true;
+    fn anyPrints(self: *const Self, items: []const NodeIndex) bool {
+        for (items) |s| if (!self.stripsToNothing(s)) return true;
         return false;
     }
 
-    fn printBlock(self: *Self, items: IndexRange, prologue: bool) Error!void {
+    fn printBlock(self: *Self, items: []const NodeIndex, prologue: bool) Error!void {
         try self.out.writeByte('{');
         if (items.len > 0) {
             if (try self.printIndentedStmtList(items, prologue)) {
@@ -1052,18 +1088,26 @@ const Printer = struct {
         }
     }
 
+    fn emitDialect(self: *Self, node: *const ast.Dialect, idx: NodeIndex) Error!void {
+        if (comptime !dialect.prints) {
+            return self.diagnose(idx, "A dialect node prints only with its dialect's print");
+        }
+        var printer: DialectPrinter = .{ .inner = self };
+        try dialect.print(&printer, node.kind, self.tree.extra(node.children));
+    }
+
     fn emit_block_statement(self: *Self, s: *const ast.BlockStatement) Error!void {
-        try self.printBlock(s.body, false);
+        try self.printBlock(self.tree.extra(s.body), false);
     }
 
     fn emit_function_body(self: *Self, b: *const ast.FunctionBody) Error!void {
-        try self.printBlock(b.body, true);
+        try self.printBlock(self.tree.extra(b.body), true);
     }
 
     fn emit_static_block(self: *Self, b: *const ast.StaticBlock) Error!void {
         try self.out.writeStr("static");
         try self.out.space();
-        try self.printBlock(b.body, false);
+        try self.printBlock(self.tree.extra(b.body), false);
     }
 
     fn emit_directive(self: *Self, d: *const ast.Directive) Error!void {
@@ -1091,25 +1135,22 @@ const Printer = struct {
     fn emit_expression_statement(self: *Self, s: *const ast.ExpressionStatement) Error!void {
         const as_directive = self.in_prologue and self.nodeData(s.expression) == .string_literal;
         self.in_prologue = false;
-        if (as_directive) {
-            try self.out.writeByte('(');
-            try self.emit(s.expression);
-            try self.out.writeByte(')');
-            try self.softSemi();
-            return;
-        }
         self.out.lead = .stmt;
-        try self.emitExpr(s.expression, .{});
+        try self.wrapIf(as_directive, s.expression, .{});
         try self.softSemi();
     }
 
-    fn emit_if_statement(self: *Self, s: *const ast.IfStatement) Error!void {
-        try self.out.writeStr("if");
+    fn printParenHead(self: *Self, keyword: []const u8, head: NodeIndex) Error!void {
+        try self.out.writeStr(keyword);
         try self.out.space();
         try self.out.writeByte('(');
-        try self.emit(s.@"test");
+        try self.emit(head);
         try self.out.writeByte(')');
         try self.out.space();
+    }
+
+    fn emit_if_statement(self: *Self, s: *const ast.IfStatement) Error!void {
+        try self.printParenHead("if", s.@"test");
         try self.emitStmt(s.consequent);
         if (s.alternate != .null) {
             try self.flushSemi();
@@ -1132,8 +1173,7 @@ const Printer = struct {
         try self.softSemi();
     }
 
-    // asi would split an operand whose first token follows a line terminator, so that opens a
-    // paren the operand closes
+    // ASI splits an operand whose first token follows a line break, so that break opens a paren
     fn emitRestrictedArg(self: *Self, idx: NodeIndex, ctx: Ctx) Error!void {
         if (idx == .null) return;
         try self.out.writeByte(' ');
@@ -1182,28 +1222,17 @@ const Printer = struct {
 
     fn emit_labeled_statement(self: *Self, s: *const ast.LabeledStatement) Error!void {
         try self.emit(s.label);
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printColon();
         try self.emitStmt(s.body);
     }
 
     fn emit_with_statement(self: *Self, s: *const ast.WithStatement) Error!void {
-        try self.out.writeStr("with");
-        try self.out.space();
-        try self.out.writeByte('(');
-        try self.emit(s.object);
-        try self.out.writeByte(')');
-        try self.out.space();
+        try self.printParenHead("with", s.object);
         try self.emitStmt(s.body);
     }
 
     fn emit_while_statement(self: *Self, s: *const ast.WhileStatement) Error!void {
-        try self.out.writeStr("while");
-        try self.out.space();
-        try self.out.writeByte('(');
-        try self.emit(s.@"test");
-        try self.out.writeByte(')');
-        try self.out.space();
+        try self.printParenHead("while", s.@"test");
         try self.emitStmt(s.body);
     }
 
@@ -1290,16 +1319,10 @@ const Printer = struct {
     }
 
     fn emit_switch_statement(self: *Self, s: *const ast.SwitchStatement) Error!void {
-        try self.out.writeStr("switch");
-        try self.out.space();
-        try self.out.writeByte('(');
-        try self.emit(s.discriminant);
-        try self.out.writeByte(')');
-        try self.out.space();
+        try self.printParenHead("switch", s.discriminant);
         try self.out.writeByte('{');
-        const cases = self.tree.extra(s.cases);
-        if (cases.len > 0) {
-            for (cases) |c| {
+        if (s.cases.len > 0) {
+            for (self.tree.extra(s.cases)) |c| {
                 try self.flushSemi();
                 try self.newline();
                 try self.emit(c);
@@ -1314,14 +1337,13 @@ const Printer = struct {
         if (c.@"test" != .null) {
             try self.out.writeStr("case ");
             try self.emit(c.@"test");
-            try self.out.writeByte(':');
         } else {
             try self.out.writeStr("default");
             try self.emitInsideCommentsInline(self.current_idx);
-            try self.out.writeByte(':');
         }
+        try self.out.writeByte(':');
         if (c.consequent.len == 0) return;
-        _ = try self.printIndentedStmtList(c.consequent, false);
+        _ = try self.printIndentedStmtList(self.tree.extra(c.consequent), false);
     }
 
     fn emit_try_statement(self: *Self, s: *const ast.TryStatement) Error!void {
@@ -1376,7 +1398,7 @@ const Printer = struct {
         try self.emit(d.id);
         std.debug.assert(!self.definite_pending);
         if (d.init != .null) {
-            try self.printEq();
+            try self.printSpaced('=');
             try self.emitExpr(d.init, .{ .prec = Precedence.Assignment, .no_in = self.decl_no_in });
         }
     }
@@ -1415,13 +1437,9 @@ const Printer = struct {
         ctx: Ctx,
     ) Error!void {
         try self.emitExpr(e.@"test", .{ .prec = Precedence.LogicalOr, .no_in = ctx.no_in });
-        try self.out.space();
-        try self.out.writeByte('?');
-        try self.out.space();
+        try self.printSpaced('?');
         try self.emitExpr(e.consequent, .{ .prec = Precedence.Assignment });
-        try self.out.space();
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printSpaced(':');
         try self.emitExpr(e.alternate, .{ .prec = Precedence.Assignment, .no_in = ctx.no_in });
     }
 
@@ -1500,8 +1518,13 @@ const Printer = struct {
             try self.closeItem(i + 1 < list.len, depth);
         }
         try self.closeList(depth);
-        // a trailing hole needs its own comma, else `[a,]` is one element
-        if (list.len > 0 and list[list.len - 1] == .null) try self.out.writeByte(',');
+        try self.closeArray(list, .null);
+    }
+
+    // a trailing hole needs its own comma, else `[a,]` is one element
+    fn closeArray(self: *Self, elements: []const NodeIndex, rest: NodeIndex) Error!void {
+        const hole = rest == .null and elements.len > 0 and elements[elements.len - 1] == .null;
+        if (hole) try self.out.writeByte(',');
         try self.out.writeByte(']');
     }
 
@@ -1548,8 +1571,7 @@ const Printer = struct {
         }
 
         try self.printObjectKey(p.key, p.computed);
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printColon();
         try self.emitChildOfAssignTarget(p.value);
     }
 
@@ -1840,9 +1862,8 @@ const Printer = struct {
     fn emit_assignment_pattern(self: *Self, p: *const ast.AssignmentPattern) Error!void {
         if (!self.options.strip) try self.printDecorators(p.decorators);
         try self.emit(p.left);
-        if (!self.options.strip) if (p.optional) try self.out.writeByte('?');
-        try self.emit(p.type_annotation);
-        try self.printEq();
+        try self.printBindingSuffix(p.optional, false, p.type_annotation);
+        try self.printSpaced('=');
         try self.emitValue(p.right);
     }
 
@@ -1850,8 +1871,7 @@ const Printer = struct {
         if (!self.options.strip) try self.printDecorators(r.decorators);
         try self.out.writeStr("...");
         try self.emit(r.argument);
-        if (!self.options.strip) if (r.optional) try self.out.writeByte('?');
-        try self.emit(r.type_annotation);
+        try self.printBindingSuffix(r.optional, false, r.type_annotation);
     }
 
     fn emit_array_pattern(self: *Self, p: *const ast.ArrayPattern) Error!void {
@@ -1870,11 +1890,7 @@ const Printer = struct {
             try self.closeItem(false, depth);
         }
         try self.closeList(depth);
-        if (p.rest == .null and list.len > 0 and list[list.len - 1] == .null) {
-            // a trailing hole needs its own comma, else `[a,]` is one element
-            try self.out.writeByte(',');
-        }
-        try self.out.writeByte(']');
+        try self.closeArray(list, p.rest);
         try self.printBindingSuffix(p.optional, definite, p.type_annotation);
     }
 
@@ -1898,8 +1914,7 @@ const Printer = struct {
             return;
         }
         try self.printObjectKey(p.key, p.computed);
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printColon();
         try self.emitAssignTarget(p.value, .{});
     }
 
@@ -2019,10 +2034,7 @@ const Printer = struct {
         const depth = self.indent_depth;
         for (items, 0..) |item, i| {
             const node = parameterOf(self.tree, item);
-            if (self.options.strip and self.stripsToNothing(node)) {
-                try self.emitNothing(node);
-                continue;
-            }
+            if (try self.skipStripped(node)) continue;
             try self.emitExpr(node, .{ .defer_trailing = true });
             try self.closeItem(i + 1 < end or rest != .null, depth);
         }
@@ -2054,12 +2066,10 @@ const Printer = struct {
             });
             try self.emit(c.super_type_arguments);
         }
-        if (!self.options.strip) {
-            if (self.tree.extra(c.implements).len > 0) {
-                try self.out.writeStr(" implements ");
-                try self.emitList(c.implements);
-            }
-        }
+        if (!self.options.strip) if (c.implements.len > 0) {
+            try self.out.writeStr(" implements ");
+            try self.emitList(c.implements);
+        };
         try self.out.space();
         try self.emit(c.body);
     }
@@ -2069,10 +2079,7 @@ const Printer = struct {
         self.indent_depth += 1;
         var any = false;
         for (self.tree.extra(b.body)) |m| {
-            if (self.options.strip and self.stripsToNothing(m)) {
-                try self.emitNothing(m);
-                continue;
-            }
+            if (try self.skipStripped(m)) continue;
             try self.flushSemi();
             try self.newline();
             try self.emit(m);
@@ -2094,10 +2101,7 @@ const Printer = struct {
         try self.printDecorators(m.decorators);
         try self.hoistKeyComments(m.key);
         defer self.skip_leading_of = .null;
-        if (!self.options.strip) if (m.accessibility != .none) {
-            try self.out.writeStr(m.accessibility.toString());
-            try self.out.writeByte(' ');
-        };
+        if (!self.options.strip) try self.printAccessibility(m.accessibility);
         if (m.static) try self.out.writeStr("static ");
         if (!self.options.strip) {
             if (m.abstract) try self.out.writeStr("abstract ");
@@ -2123,10 +2127,7 @@ const Printer = struct {
         defer self.skip_leading_of = .null;
         if (!self.options.strip) {
             if (p.declare) try self.out.writeStr("declare ");
-            if (p.accessibility != .none) {
-                try self.out.writeStr(p.accessibility.toString());
-                try self.out.writeByte(' ');
-            }
+            try self.printAccessibility(p.accessibility);
         }
         if (p.static) try self.out.writeStr("static ");
         if (!self.options.strip) {
@@ -2145,10 +2146,16 @@ const Printer = struct {
         try self.emitOwedComments();
         try self.emit(p.type_annotation);
         if (p.value != .null) {
-            try self.printEq();
+            try self.printSpaced('=');
             try self.emitValue(p.value);
         }
         try self.softSemi();
+    }
+
+    fn printAccessibility(self: *Self, accessibility: ast.Accessibility) Error!void {
+        if (accessibility == .none) return;
+        try self.out.writeStr(accessibility.toString());
+        try self.out.writeByte(' ');
     }
 
     fn emit_decorator(self: *Self, d: *const ast.Decorator) Error!void {
@@ -2236,12 +2243,7 @@ const Printer = struct {
     fn emit_import_specifier(self: *Self, s: *const ast.ImportSpecifier) Error!void {
         if (self.options.strip) std.debug.assert(s.import_kind != .type);
         if (s.import_kind == .type) try self.out.writeStr("type ");
-        try self.emit(s.imported);
-        const same = sameIdentifier(self.tree, s.imported, s.local);
-        if (!same or self.hasPrintedComments(s.local)) {
-            try self.out.writeStr(" as ");
-            try self.emit(s.local);
-        }
+        try self.printSpecifier(s.imported, s.local);
     }
 
     fn emit_import_default_specifier(self: *Self, s: *const ast.ImportDefaultSpecifier) Error!void {
@@ -2258,8 +2260,7 @@ const Printer = struct {
 
     fn emit_import_attribute(self: *Self, a: *const ast.ImportAttribute) Error!void {
         try self.emit(a.key);
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printColon();
         try self.emit(a.value);
     }
 
@@ -2286,13 +2287,11 @@ const Printer = struct {
         const list = self.tree.extra(d.specifiers);
         if (self.options.strip) {
             if (d.export_kind == .type) return;
-            const no_value_specifiers = d.declaration == .null and list.len > 0 and
-                !hasValueExportSpecifier(self.tree, list);
-            if (no_value_specifiers) return;
-        }
-
-        if (self.options.strip and d.declaration != .null and self.stripsToNothing(d.declaration)) {
-            return self.emitNothing(d.declaration);
+            if (d.declaration != .null) {
+                if (try self.skipStripped(d.declaration)) return;
+            } else {
+                if (list.len > 0 and !hasValueExportSpecifier(self.tree, list)) return;
+            }
         }
         const hoisted = self.decoratorsBeforeExport(d.declaration);
         if (hoisted) |decorators| try self.printDecorators(decorators);
@@ -2324,9 +2323,7 @@ const Printer = struct {
         d: *const ast.ExportDefaultDeclaration,
     ) Error!void {
         if (self.nodeData(d.declaration).isDeclaration()) {
-            if (self.options.strip and self.stripsToNothing(d.declaration)) {
-                return self.emitNothing(d.declaration);
-            }
+            if (try self.skipStripped(d.declaration)) return;
             const hoisted = self.decoratorsBeforeExport(d.declaration);
             if (hoisted) |decorators| try self.printDecorators(decorators);
             try self.out.writeStr("export default ");
@@ -2368,17 +2365,19 @@ const Printer = struct {
     fn emit_export_specifier(self: *Self, s: *const ast.ExportSpecifier) Error!void {
         if (self.options.strip) std.debug.assert(s.export_kind != .type);
         if (s.export_kind == .type) try self.out.writeStr("type ");
-        try self.emit(s.local);
-        const same = sameIdentifier(self.tree, s.local, s.exported);
-        if (!same or self.hasPrintedComments(s.exported)) {
+        try self.printSpecifier(s.local, s.exported);
+    }
+
+    fn printSpecifier(self: *Self, name: NodeIndex, alias: NodeIndex) Error!void {
+        try self.emit(name);
+        if (!sameIdentifier(self.tree, name, alias) or self.hasPrintedComments(alias)) {
             try self.out.writeStr(" as ");
-            try self.emit(s.exported);
+            try self.emit(alias);
         }
     }
 
     fn printAttributes(self: *Self, attrs: IndexRange) Error!void {
-        const list = self.tree.extra(attrs);
-        if (list.len == 0) return;
+        if (attrs.len == 0) return;
         try self.out.writeStr(" with ");
         try self.out.writeByte('{');
         try self.out.space();
@@ -2388,8 +2387,7 @@ const Printer = struct {
     }
 
     fn emit_ts_type_annotation(self: *Self, t: *const ast.TSTypeAnnotation) Error!void {
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printColon();
         try self.emit(t.type_annotation);
     }
 
@@ -2436,7 +2434,7 @@ const Printer = struct {
             try self.emit(p.constraint);
         }
         if (p.default != .null) {
-            try self.printEq();
+            try self.printSpaced('=');
             try self.emit(p.default);
         }
     }
@@ -2521,8 +2519,7 @@ const Printer = struct {
     fn emit_ts_named_tuple_member(self: *Self, m: *const ast.TSNamedTupleMember) Error!void {
         try self.emit(m.label);
         if (m.optional) try self.out.writeByte('?');
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printColon();
         try self.emit(m.element_type);
     }
 
@@ -2570,11 +2567,7 @@ const Printer = struct {
         }
         const floor: u8 = if (op == '|') TPrec.intersection else TPrec.operator;
         for (list, 0..) |x, i| {
-            if (i > 0) {
-                try self.out.space();
-                try self.out.writeByte(op);
-                try self.out.space();
-            }
+            if (i > 0) try self.printSpaced(op);
             try self.emitType(x, floor, .{});
         }
     }
@@ -2583,13 +2576,9 @@ const Printer = struct {
         try self.emitType(t.check_type, TPrec.@"union", .{ .defer_trailing = true });
         try self.writeKeywordThenOwed(" extends");
         try self.emitType(t.extends_type, TPrec.@"union", .{});
-        try self.out.space();
-        try self.out.writeByte('?');
-        try self.out.space();
+        try self.printSpaced('?');
         try self.emit(t.true_type);
-        try self.out.space();
-        try self.out.writeByte(':');
-        try self.out.space();
+        try self.printSpaced(':');
         try self.emit(t.false_type);
     }
 
@@ -2673,8 +2662,7 @@ const Printer = struct {
         try self.out.writeByte(']');
         try self.printMappedOptional(t.optional);
         if (t.type_annotation != .null) {
-            try self.out.writeByte(':');
-            try self.out.space();
+            try self.printColon();
             try self.emit(t.type_annotation);
         }
         try self.softSemi();
@@ -2760,7 +2748,7 @@ const Printer = struct {
 
     fn printSignatureBody(self: *Self, items: IndexRange) Error!void {
         try self.out.writeByte('{');
-        if (self.tree.extra(items).len > 0) {
+        if (items.len > 0) {
             self.indent_depth += 1;
             for (self.tree.extra(items)) |s| {
                 try self.flushSemi();
@@ -2784,7 +2772,7 @@ const Printer = struct {
         try self.out.writeStr("type ");
         try self.emit(d.id);
         try self.emit(d.type_parameters);
-        try self.printEq();
+        try self.printSpaced('=');
         // a leftmost bare `intrinsic` reference would reparse as the keyword
         const intrinsic = self.isLeftmostIntrinsicReference(d.type_annotation);
         try self.wrapIf(intrinsic, d.type_annotation, .{});
@@ -2815,8 +2803,7 @@ const Printer = struct {
     }
 
     fn firstType(self: *const Self, types: IndexRange) ?NodeIndex {
-        const list = self.tree.extra(types);
-        return if (list.len > 0) list[0] else null;
+        return if (types.len > 0) self.tree.extra(types)[0] else null;
     }
 
     fn emit_ts_interface_declaration(self: *Self, d: *const ast.TSInterfaceDeclaration) Error!void {
@@ -2824,7 +2811,7 @@ const Printer = struct {
         try self.out.writeStr("interface ");
         try self.emit(d.id);
         try self.emit(d.type_parameters);
-        if (self.tree.extra(d.extends).len > 0) {
+        if (d.extends.len > 0) {
             try self.out.writeStr(" extends ");
             try self.emitList(d.extends);
         }
@@ -2882,7 +2869,7 @@ const Printer = struct {
             try self.emit(m.id);
         }
         if (m.initializer != .null) {
-            try self.printEq();
+            try self.printSpaced('=');
             try self.emit(m.initializer);
         }
     }
@@ -2901,7 +2888,7 @@ const Printer = struct {
     }
 
     fn emit_ts_module_block(self: *Self, b: *const ast.TSModuleBlock) Error!void {
-        try self.printBlock(b.body, false);
+        try self.printBlock(self.tree.extra(b.body), false);
     }
 
     fn emit_ts_global_declaration(self: *Self, d: *const ast.TSGlobalDeclaration) Error!void {
@@ -2925,7 +2912,7 @@ const Printer = struct {
 
     fn emit_ts_export_assignment(self: *Self, e: *const ast.TSExportAssignment) Error!void {
         try self.out.writeStr("export");
-        try self.printEq();
+        try self.printSpaced('=');
         try self.emit(e.expression);
         try self.softSemi();
     }
@@ -2946,7 +2933,7 @@ const Printer = struct {
         try self.out.writeStr("import ");
         if (d.import_kind == .type) try self.out.writeStr("type ");
         try self.emit(d.id);
-        try self.printEq();
+        try self.printSpaced('=');
         try self.emit(d.module_reference);
         try self.softSemi();
     }
@@ -2962,10 +2949,7 @@ const Printer = struct {
 
     fn emit_ts_parameter_property(self: *Self, p: *const ast.TSParameterProperty) Error!void {
         try self.printDecorators(p.decorators);
-        if (p.accessibility != .none) {
-            try self.out.writeStr(p.accessibility.toString());
-            try self.out.writeByte(' ');
-        }
+        try self.printAccessibility(p.accessibility);
         if (p.override) try self.out.writeStr("override ");
         if (p.readonly) try self.out.writeStr("readonly ");
         try self.emit(p.parameter);
@@ -3225,15 +3209,14 @@ fn needsSpaceBeforeInlineComment(last: u8) bool {
     };
 }
 
-fn strippedOperand(tree: *const Tree, idx: NodeIndex) NodeIndex {
-    return switch (tree.data(idx)) {
+inline fn castOperand(data: NodeData) ?NodeIndex {
+    return switch (data) {
         .ts_as_expression => |e| e.expression,
         .ts_satisfies_expression => |e| e.expression,
         .ts_non_null_expression => |e| e.expression,
         .ts_instantiation_expression => |e| e.expression,
         .ts_type_assertion => |e| e.expression,
-        .ts_parameter_property => |p| p.parameter,
-        else => unreachable,
+        else => null,
     };
 }
 

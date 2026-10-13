@@ -19,8 +19,8 @@ pub inline fn parseTypeArgumentsInExpression(parser: *Parser) Error!ast.NodeInde
 
 // a newline before `<` keeps `typeof a` apart from a generic function type after it
 pub inline fn parseTypeArgumentsAfterEntityName(parser: *Parser) Error!ast.NodeIndex {
-    if (!isAngleOpen(parser.current_token.tag) or
-        parser.current_token.hasLineTerminatorBefore()) return .null;
+    if (!isAngleOpen(parser.current_token.tag)) return .null;
+    if (parser.current_token.hasLineTerminatorBefore()) return .null;
     return parseAngleList(parser, .arguments, .peel);
 }
 
@@ -64,10 +64,12 @@ fn parseAngleList(
         try parser.advance() orelse return .null;
     }
 
-    if (!parsed_any) try parser.report(parser.current_token.span, switch (kind) {
-        .arguments => "A type argument list cannot be empty",
-        .parameters => "A type parameter list cannot be empty",
-    }, .{});
+    if (!parsed_any) {
+        try parser.report(parser.current_token.span, switch (kind) {
+            .arguments => "A type argument list cannot be empty",
+            .parameters => "A type parameter list cannot be empty",
+        }, .{});
+    }
 
     const end = try consumeAngleClose(parser, kind, close) orelse return .null;
     const params = try parser.flushToExtras(&parser.scratch_a, checkpoint);

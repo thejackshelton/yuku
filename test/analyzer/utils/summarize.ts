@@ -27,9 +27,18 @@ export function summary(source: string, options: AnalyzeOptions = {}): string {
     }
   }
 
-  const childrenOf = groupScopeChildren(module);
-  const referencesByScope = groupReferencesByScope(module);
-  renderScope(module.scopes[0]!, 0, lines, childrenOf, referencesByScope);
+  const childrenByScope = groupBy(module.scopes, (scope) => scope.parent?.id);
+  const referencesByScope = groupBy(module.references, (reference) => reference.scope.id);
+  const render = (scope: Scope, depth: number): void => {
+    const inner = "  ".repeat(depth + 1);
+    lines.push("  ".repeat(depth) + scopeHeader(scope));
+    for (const binding of scope.bindings) lines.push(inner + bindingRow(binding));
+    for (const reference of referencesByScope.get(scope.id) ?? []) {
+      lines.push(inner + referenceRow(reference));
+    }
+    for (const child of childrenByScope.get(scope.id) ?? []) render(child, depth + 1);
+  };
+  render(module.scopes[0]!, 0);
 
   if (module.imports.length > 0) {
     lines.push("imports");
@@ -41,26 +50,6 @@ export function summary(source: string, options: AnalyzeOptions = {}): string {
   }
 
   return lines.join("\n");
-}
-
-function renderScope(
-  scope: Scope,
-  depth: number,
-  lines: string[],
-  childrenOf: Map<number, Scope[]>,
-  referencesByScope: Map<number, Reference[]>,
-): void {
-  const pad = "  ".repeat(depth);
-  const inner = "  ".repeat(depth + 1);
-
-  lines.push(pad + scopeHeader(scope));
-  for (const binding of scope.bindings) lines.push(inner + bindingRow(binding));
-  for (const reference of referencesByScope.get(scope.id) ?? []) {
-    lines.push(inner + referenceRow(reference));
-  }
-  for (const child of childrenOf.get(scope.id) ?? []) {
-    renderScope(child, depth + 1, lines, childrenOf, referencesByScope);
-  }
 }
 
 // `[strict]` marks only where strictness turns on
@@ -103,7 +92,6 @@ function referenceRow(reference: Reference): string {
   return `${reference.name} → ${target}${write}${space}`;
 }
 
-// one kind plus qualifiers per binding
 function flagWords(flags: number): string {
   const words: string[] = [];
   if (flags & BindingFlags.FunctionScopedVariable) {
@@ -157,26 +145,16 @@ function exportRow(record: Export): string {
   return `${record.name} → ${local}${type}`;
 }
 
-function groupScopeChildren(module: Module): Map<number, Scope[]> {
-  const children = new Map<number, Scope[]>();
-  for (const scope of module.scopes) {
-    const parent = scope.parent;
-    if (parent === null) continue;
-    const list = children.get(parent.id) ?? [];
-    list.push(scope);
-    children.set(parent.id, list);
+function groupBy<T>(items: T[], keyOf: (item: T) => number | undefined): Map<number, T[]> {
+  const groups = new Map<number, T[]>();
+  for (const item of items) {
+    const key = keyOf(item);
+    if (key === undefined) continue;
+    const group = groups.get(key);
+    if (group === undefined) groups.set(key, [item]);
+    else group.push(item);
   }
-  return children;
-}
-
-function groupReferencesByScope(module: Module): Map<number, Reference[]> {
-  const byScope = new Map<number, Reference[]>();
-  for (const reference of module.references) {
-    const list = byScope.get(reference.scope.id) ?? [];
-    list.push(reference);
-    byScope.set(reference.scope.id, list);
-  }
-  return byScope;
+  return groups;
 }
 
 const FUNCTION_TYPES = [
@@ -188,11 +166,12 @@ const FUNCTION_TYPES = [
 export function captures(source: string, options: AnalyzeOptions = {}): string {
   const module = analyzeOne(source, options);
   const lines: string[] = [];
-  for (const fn of module.findAll(FUNCTION_TYPES)) {
-    const caps = module
-      .capturesOf(fn)
-      .map((c) => `${c.binding.name}#${c.binding.id}${c.isWritten ? "(w)" : ""}`);
-    lines.push(`${functionLabel(fn)}  captures: ${caps.length > 0 ? caps.join(", ") : "(none)"}`);
+  for (const node of module.findAll(FUNCTION_TYPES)) {
+    const captured = module
+      .capturesOf(node)
+      .map(({ binding, isWritten }) => `${binding.name}#${binding.id}${isWritten ? "(w)" : ""}`);
+    const list = captured.length > 0 ? captured.join(", ") : "(none)";
+    lines.push(`${functionLabel(node)}  captures: ${list}`);
   }
   return lines.join("\n");
 }
@@ -220,8 +199,8 @@ export function links(files: Record<string, string>): string {
   }
   lines.push("graph");
   for (const module of analyzer.modules.values()) {
-    const deps = module.dependencies.map((d) => d.path).join(", ") || "(none)";
-    lines.push(`  ${module.path} → ${deps}`);
+    const dependencies = module.dependencies.map((dependency) => dependency.path);
+    lines.push(`  ${module.path} → ${dependencies.join(", ") || "(none)"}`);
   }
   lines.push("exportedNames");
   for (const module of analyzer.modules.values()) {
@@ -239,16 +218,16 @@ function bindingOf(analyzer: Analyzer, path: string, name: string): Binding {
 }
 
 export function definition(analyzer: Analyzer, path: string, name: string): string {
-  const def = bindingOf(analyzer, path, name).definition();
-  if (def === null) return "(none)";
-  const defined = `${def.module.path}:${def.binding ? def.binding.name : "(namespace)"}`;
-  const augmented = def.augmentations.map((binding) => `${binding.module.path}:${binding.name}`);
+  const found = bindingOf(analyzer, path, name).definition();
+  if (found === null) return "(none)";
+  const defined = `${found.module.path}:${found.binding ? found.binding.name : "(namespace)"}`;
+  const augmented = found.augmentations.map((binding) => `${binding.module.path}:${binding.name}`);
   return [defined, ...augmented].join(" + ");
 }
 
 export function references(analyzer: Analyzer, path: string, name: string): string {
   return bindingOf(analyzer, path, name)
     .findReferences()
-    .map((r) => `${r.module.path}:${r.name}${r.isWrite ? "(w)" : ""}`)
+    .map((use) => `${use.module.path}:${use.name}${use.isWrite ? "(w)" : ""}`)
     .join(", ");
 }

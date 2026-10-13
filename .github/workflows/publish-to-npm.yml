@@ -35,9 +35,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          # Pinned exact: this Node bundles npm 11.16.0. npm 12.0.0 breaks
-          # provenance publishing (https://github.com/npm/cli/issues/9722), and every Node 24.x ships
-          # npm 11, so pinning here removes the need for an ad-hoc npm install.
+          # bundles npm 11, as npm 12 breaks provenance (https://github.com/npm/cli/issues/9722)
           node-version: "24.18.0"
           registry-url: "https://registry.npmjs.org"
 
@@ -50,25 +48,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # `bun pm pack` resolves workspace deps from bun.lock, so a lockfile
-      # that wasn't regenerated after the version bump would publish packages
-      # depending on the previous release (https://github.com/oven-sh/bun/issues/20477).
       - name: Verify lockfile workspace versions
         run: bun .github/scripts/check-lock-versions.ts
 
-      # Read the notes before building, so a tag without them fails before
-      # anything is published.
+      # before the build, so a tag without notes fails early
       - name: Read the release notes
         run: bun .github/scripts/release-notes.ts "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
 
       - name: Build
-        run: bun run build:npm
-
-      - name: Build wasm
-        run: bun run build:wasm
+        run: bun run build
 
       - name: Publish packages to npm
-        run: bun napi-zig publish
+        run: bun .github/scripts/publish.ts
 
       - name: Create the GitHub release
         run: |

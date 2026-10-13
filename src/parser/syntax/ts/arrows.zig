@@ -13,10 +13,7 @@ pub const ArrowHead = enum { no, yes, maybe };
 
 pub fn classifyArrowHead(parser: *Parser) ArrowHead {
     if (parser.current_token.tag != .left_paren) return .no;
-    return classifyParenArrowHead(parser);
-}
 
-fn classifyParenArrowHead(parser: *Parser) ArrowHead {
     var peek = parser.beginPeek();
     defer peek.end();
 

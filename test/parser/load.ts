@@ -17,9 +17,9 @@ if (branchIndex !== -1 && argv[branchIndex + 1]) {
   argv.splice(branchIndex, 2);
 }
 
-const dest = argv[0] ?? SUITE_DIR;
+const target = argv[0] ?? SUITE_DIR;
 const ref = branch ?? "HEAD";
-const revPath = path.join(dest, REV_FILE);
+const revPath = path.join(target, REV_FILE);
 
 type RevResult =
   | { kind: "ok"; sha: string }
@@ -38,7 +38,7 @@ function resolveRemoteRev(): RevResult {
   return /^[0-9a-f]{40}$/.test(sha) ? { kind: "ok", sha } : { kind: "missing-ref" };
 }
 
-const haveSuite = existsSync(dest);
+const haveSuite = existsSync(target);
 const localRev = await Bun.file(revPath)
   .text()
   .then((text) => text.trim())
@@ -68,12 +68,12 @@ if (haveSuite && localRev === wanted) {
 
 if (haveSuite) {
   console.log(`\nsuite ${localRev ? "changed upstream" : "revision unknown"}, re-downloading`);
-  await rm(dest, { recursive: true, force: true });
+  await rm(target, { recursive: true, force: true });
 }
 
 console.log("\nDownloading test suite...\n");
 
-const gitCmd = [
+const cloneCommand = [
   "git",
   // snapshot spans are UTF-16 offsets, keep fixture line endings as committed
   "-c",
@@ -85,20 +85,20 @@ const gitCmd = [
   "1",
   ...(branch ? ["--branch", branch] : []),
   TEST_SUITE_REPO_URL,
-  dest,
+  target,
 ];
 
-const clone = Bun.spawnSync({ cmd: gitCmd, stderr: "inherit" });
+const clone = Bun.spawnSync({ cmd: cloneCommand, stderr: "inherit" });
 
 if (clone.exitCode !== 0) {
   console.error("\nfailed to clone the test suite\n");
   process.exit(clone.exitCode ?? 1);
 }
 
-const entries = await readdir(dest);
+const entries = await readdir(target);
 for (const entry of entries) {
   if (!INCLUDE_FOLDERS.includes(entry)) {
-    await rm(path.join(dest, entry), { recursive: true, force: true });
+    await rm(path.join(target, entry), { recursive: true, force: true });
   }
 }
 

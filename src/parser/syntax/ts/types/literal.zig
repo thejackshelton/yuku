@@ -1,4 +1,3 @@
-const std = @import("std");
 const ast = @import("../../../ast.zig");
 const Parser = @import("../../../parser.zig").Parser;
 const Error = @import("../../../parser.zig").Error;
@@ -50,66 +49,17 @@ fn parseSignedNumericLiteralType(parser: *Parser) Error!?ast.NodeIndex {
     );
 }
 
-// `Hello, ${World}!`
-// ^^^^^^^^^^^^^^^^^^
 pub fn parseTemplateLiteralType(parser: *Parser) Error!?ast.NodeIndex {
-    std.debug.assert(parser.current_token.tag == .template_head);
-
     const start = parser.current_token.span.start;
-
-    const quasis_checkpoint = parser.scratch_a.begin();
-    defer parser.scratch_a.reset(quasis_checkpoint);
-    const types_checkpoint = parser.scratch_b.begin();
-    defer parser.scratch_b.reset(types_checkpoint);
-
-    const head = parser.current_token;
-    try parser.scratch_a.append(
-        parser.allocator(),
-        try literals.addTemplateElement(parser, head, false, false),
-    );
-    try parser.advance() orelse return null;
-
-    var end = head.span.end;
-
-    while (true) {
-        const ty = try core.parseType(parser) orelse return null;
-        try parser.scratch_b.append(parser.allocator(), ty);
-
-        // the lexer emits `}` as a punctuator, rescan it as template continuation
-        if (parser.current_token.tag != .right_brace) {
-            try parser.reportExpected(
-                parser.current_token.span,
-                "Expected '}' to close template type interpolation",
-                .{ .help = "Template type interpolations must be closed with '}'" },
-            );
-            return null;
-        }
-
-        const template_token = parser.lexer.reScanTemplateContinuation(
-            parser.current_token.span.start,
-        ) catch |e| {
-            try parser.reportLexicalError(e);
-            return null;
-        };
-
-        const is_tail = template_token.tag == .template_tail;
-
-        try parser.scratch_a.append(
-            parser.allocator(),
-            try literals.addTemplateElement(parser, template_token, is_tail, false),
-        );
-
-        end = template_token.span.end;
-        try parser.advanceWithRescannedToken(template_token) orelse return null;
-
-        if (is_tail) break;
-    }
+    const parts = try literals.parseTemplateParts(
+        parser,
+        false,
+        "type interpolation",
+        core.parseType,
+    ) orelse return null;
 
     return try parser.tree.addNode(
-        .{ .ts_template_literal_type = .{
-            .quasis = try parser.flushToExtras(&parser.scratch_a, quasis_checkpoint),
-            .types = try parser.flushToExtras(&parser.scratch_b, types_checkpoint),
-        } },
-        .{ .start = start, .end = end },
+        .{ .ts_template_literal_type = .{ .quasis = parts.quasis, .types = parts.substitutions } },
+        .{ .start = start, .end = parts.end },
     );
 }

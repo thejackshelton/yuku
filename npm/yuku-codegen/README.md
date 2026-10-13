@@ -2,7 +2,7 @@
 
 A fast code generator for any ESTree / TypeScript-ESTree AST, with type stripping, minification, and Source Map V3 output, part of [Yuku](https://yuku.fyi).
 
-It is plain JavaScript with no native binary, and prints any ESTree AST, whichever parser produced it. Its output is byte-identical to Yuku's Zig printer, source maps included, and it runs 2.6x faster than `@babel/generator`, or 3x with source maps on.
+It is plain JavaScript with no native binary, and works on any parser's AST. Its output is byte-identical to Yuku's Zig printer, source maps included, and it runs 2.6x faster than `@babel/generator`, or 3x with source maps on.
 
 - [Install](#install)
 - [Usage](#usage)
@@ -13,6 +13,7 @@ It is plain JavaScript with no native binary, and prints any ESTree AST, whichev
 - [Quotes](#quotes)
 - [Comments](#comments)
 - [Source maps](#source-maps)
+- [Printing new nodes](#printing-new-nodes)
 
 ## Install
 
@@ -52,15 +53,16 @@ Every transformation is an independent flag, so they compose freely.
 generate(program, { strip: true, minify: true, sourceMap: { source } });
 ```
 
-| Option      | Type                                                        | Default      | Description                                                                 |
-| ----------- | ----------------------------------------------------------- | ------------ | --------------------------------------------------------------------------- |
-| `strip`     | `boolean`                                                   | `false`      | Drop TypeScript-only syntax. See [Type stripping](#type-stripping).         |
-| `minify`    | `boolean \| MinifyOptions`                                  | `false`      | Minify the output. See [Minification](#minification).                       |
-| `format`    | `"pretty" \| "compact"`                                     | `"pretty"`   | `"compact"` emits only the separators the grammar requires.                 |
-| `indent`    | `number`                                                    | `2`          | Spaces per level in pretty format, from 0 to 255.                           |
-| `quotes`    | `"preserve" \| "double" \| "single" \| "shortest"`          | `"preserve"` | Quote style for string literals. See [Quotes](#quotes).                     |
-| `comments`  | `boolean \| "all" \| "some" \| "none" \| "line" \| "block"` | `"some"`     | Which attached comments to emit. See [Comments](#comments).                 |
-| `sourceMap` | `SourceMapOptions`                                          | none         | Emit a Source Map V3. See [Source maps](#source-maps).                      |
+| Option      | Type                                                        | Default      | Description                                                                                |
+| ----------- | ----------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------ |
+| `strip`     | `boolean`                                                   | `false`      | Drop TypeScript-only syntax. See [Type stripping](#type-stripping).                        |
+| `minify`    | `boolean \| MinifyOptions`                                  | `false`      | Minify the output. See [Minification](#minification).                                      |
+| `format`    | `"pretty" \| "compact"`                                     | `"pretty"`   | `"compact"` emits only the separators the grammar requires.                                |
+| `indent`    | `number`                                                    | `2`          | Spaces per level in pretty format, from 0 to 255.                                          |
+| `quotes`    | `"preserve" \| "double" \| "single" \| "shortest"`          | `"preserve"` | Quote style for string literals. See [Quotes](#quotes).                                    |
+| `comments`  | `boolean \| "all" \| "some" \| "none" \| "line" \| "block"` | `"some"`     | Which attached comments to emit. See [Comments](#comments).                                |
+| `sourceMap` | `SourceMapOptions`                                          | none         | Emit a Source Map V3. See [Source maps](#source-maps).                                     |
+| `print`     | `Printers`                                                  | none         | Print node types the printer does not know. See [Printing new nodes](#printing-new-nodes). |
 
 ## Type stripping
 
@@ -71,7 +73,7 @@ generate(parse(`const x: number = 1;`, { lang: "ts" }).program, { strip: true })
 // "const x = 1;"
 ```
 
-Types, interfaces, type aliases, generics, type assertions, `satisfies`, non-null `!`, `declare`, and `abstract` strip cleanly. A few TypeScript features emit runtime values: `enum`, `namespace`, `module`, `export =`, `import = require()`, and parameter properties. Converting them is transpilation, not stripping, so each one is reported in `diagnostics` and left out, a parameter property keeps its plain parameter, and the rest of the file is still emitted. Their ambient forms (`declare enum`, `declare namespace`, `declare module`, `import type X = require(...)`) carry no runtime and strip silently.
+Types, interfaces, type aliases, generics, type assertions, `satisfies`, non-null `!`, `declare`, and `abstract` strip cleanly. A few TypeScript features emit runtime values: `enum`, `namespace`, `module`, `export =`, `import = require()`, and parameter properties. Converting them is transpilation, not stripping, so each is reported in `diagnostics` and left out (a parameter property keeps its plain parameter) while the rest of the file still prints. Their ambient forms (`declare enum`, `declare namespace`, `declare module`, `import type X = require(...)`) carry no runtime and strip silently.
 
 ## Minification
 
@@ -135,13 +137,13 @@ const output = `${code}\n//# sourceMappingURL=out.js.map`;
 const mapJson = JSON.stringify(map);
 ```
 
-| Field            | Description                                                 |
-| ---------------- | ----------------------------------------------------------- |
-| `source`         | **Required.** The original source text, positions map to it. |
-| `file`           | Output filename, embedded as `file`.                        |
-| `sourceFileName` | Source filename, the single entry of `sources`.             |
-| `sourceRoot`     | Embedded as `sourceRoot`.                                   |
-| `sourcesContent` | The single entry of `sourcesContent`.                       |
+| Field            | Description                                       |
+| ---------------- | ------------------------------------------------- |
+| `source`         | **Required.** The original source text.           |
+| `file`           | Output filename, embedded as `file`.              |
+| `sourceFileName` | Source filename, the single entry of `sources`.   |
+| `sourceRoot`     | Embedded as `sourceRoot`.                         |
+| `sourcesContent` | The single entry of `sourcesContent`.             |
 
 `map` is a Source Map V3 object, ready for `JSON.stringify`. Columns are 0-indexed UTF-16 code units, the convention of browser devtools and source map libraries.
 
@@ -156,6 +158,31 @@ interface SourceMap {
   mappings: string;
 }
 ```
+
+## Printing new nodes
+
+`print` prints node types the printer does not know, such as the nodes of a [dialect](https://yuku.fyi/parser/dialect/), keyed by `type`. Each function drives the printer, which prints the standard nodes inside with their comments and formatting.
+
+```js
+generate(program, {
+  print: {
+    PipelineExpression(node, p) {
+      p.node(node.left);
+      p.write(" |> ");
+      p.node(node.right);
+    },
+  },
+});
+```
+
+| Call           | Behavior                                            |
+| -------------- | --------------------------------------------------- |
+| `write(code)`  | Write code, spaced from what precedes it if needed. |
+| `space()`      | Write a space in the pretty format.                 |
+| `node(node)`   | Print any node, with its comments.                  |
+| `block(items)` | Print a list of statements between braces.          |
+
+A type the printer knows always prints as standard, and a type with no printer throws.
 
 ## License
 

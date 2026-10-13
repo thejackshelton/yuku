@@ -49,88 +49,56 @@ pub fn lineBreakLen(source: []const u8, pos: usize) u8 {
     };
 }
 
-pub fn parseOctal(input: []const u8, start: usize) struct { value: u21, end: usize } {
+/// A decoded code point and the offset just past its source.
+pub const Decoded = struct { value: u21, end: usize };
+
+pub fn parseOctal(input: []const u8, start: usize) Decoded {
     std.debug.assert(start < input.len);
+    const digits_max: usize = if (input[start] <= '3') 3 else 2;
     var value: u21 = 0;
     var i = start;
-    const max: usize = if (input[start] <= '3') 3 else 2;
-    var count: usize = 0;
-
-    while (i < input.len and count < max) : (i += 1) {
-        if (isOctalDigit(input[i])) {
-            value = (value << 3) | (input[i] - '0');
-            count += 1;
-        } else break;
+    while (i < input.len and i - start < digits_max and isOctalDigit(input[i])) : (i += 1) {
+        value = (value << 3) | (input[i] - '0');
     }
-
     return .{ .value = value, .end = i };
 }
 
-pub inline fn parseHex2(input: []const u8, start: usize) ?struct { value: u21, end: usize } {
+pub inline fn parseHex2(input: []const u8, start: usize) ?Decoded {
     if (start + 2 > input.len) return null;
-
     const hi = hexVal(input[start]) orelse return null;
     const lo = hexVal(input[start + 1]) orelse return null;
-
     return .{ .value = (@as(u21, hi) << 4) | lo, .end = start + 2 };
 }
 
-pub inline fn parseHex4(input: []const u8, start: usize) ?struct { value: u21, end: usize } {
+inline fn parseHex4(input: []const u8, start: usize) ?Decoded {
     if (start + 4 > input.len) return null;
-
     var value: u21 = 0;
-    for (0..4) |j| {
-        const d = hexVal(input[start + j]) orelse return null;
-        value = (value << 4) | d;
-    }
-
+    for (input[start..][0..4]) |c| value = (value << 4) | (hexVal(c) orelse return null);
     return .{ .value = value, .end = start + 4 };
 }
 
-/// Returns null when there are no digits or the value exceeds U+10FFFF.
-pub fn parseHexVariable(
-    input: []const u8,
-    start: usize,
-    max_digits: usize,
-) ?struct { value: u21, end: usize } {
+// null when there are no digits or the value exceeds U+10FFFF
+fn parseHexVariable(input: []const u8, start: usize, digits_max: usize) ?Decoded {
     var value: u32 = 0;
     var i = start;
-    var count: usize = 0;
-
-    while (i < input.len and count < max_digits) {
-        const d = hexVal(input[i]) orelse break;
-
-        value = (value << 4) | d;
-
+    while (i < input.len and i - start < digits_max) : (i += 1) {
+        value = (value << 4) | (hexVal(input[i]) orelse break);
         if (value > 0x10FFFF) return null;
-
-        count += 1;
-        i += 1;
     }
-
-    if (count == 0) return null;
-
+    if (i == start) return null;
     return .{ .value = @intCast(value), .end = i };
 }
 
 /// Parses a Unicode escape after its `\u` prefix. `start` points at `{` for the braced form
 /// or at the first of four hex digits.
-pub fn parseUnicodeEscape(input: []const u8, start: usize) ?struct { value: u21, end: usize } {
+pub fn parseUnicodeEscape(input: []const u8, start: usize) ?Decoded {
     if (start < input.len and input[start] == '{') {
-        const digit_start = start + 1;
-
-        const brace_end = std.mem.findScalarPos(u8, input, digit_start, '}') orelse return null;
-
-        const r = parseHexVariable(input, digit_start, brace_end - digit_start) orelse return null;
-
+        const brace_end = std.mem.findScalarPos(u8, input, start + 1, '}') orelse return null;
+        const r = parseHexVariable(input, start + 1, brace_end - start - 1) orelse return null;
         if (r.end != brace_end) return null;
-
         return .{ .value = r.value, .end = brace_end + 1 };
     }
-
-    const r = parseHex4(input, start) orelse return null;
-
-    return .{ .value = r.value, .end = r.end };
+    return parseHex4(input, start);
 }
 
 /// Decodes the Unicode escapes of an identifier into `buf`, or returns `raw` when they do
@@ -190,28 +158,16 @@ pub fn decodeStringEscapes(
         i += 1;
         if (i >= raw.len) break;
         switch (raw[i]) {
-            'n' => {
-                try out.append(alloc, '\n');
-                i += 1;
-            },
-            'r' => {
-                try out.append(alloc, '\r');
-                i += 1;
-            },
-            't' => {
-                try out.append(alloc, '\t');
-                i += 1;
-            },
-            'b' => {
-                try out.append(alloc, 0x08);
-                i += 1;
-            },
-            'f' => {
-                try out.append(alloc, 0x0C);
-                i += 1;
-            },
-            'v' => {
-                try out.append(alloc, 0x0B);
+            'n', 'r', 't', 'b', 'f', 'v' => |c| {
+                try out.append(alloc, switch (c) {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    'b' => 0x08,
+                    'f' => 0x0C,
+                    'v' => 0x0B,
+                    else => unreachable,
+                });
                 i += 1;
             },
             '0' => {
@@ -247,17 +203,18 @@ pub fn decodeStringEscapes(
                     i += 1;
                 }
             },
-            '\n' => i += 1, // line continuation \<LF>
+            // line continuations
+            '\n' => i += 1,
             '\r' => {
                 i += 1;
-                if (i < raw.len and raw[i] == '\n') i += 1; // line continuation \<CR><LF>
+                if (i < raw.len and raw[i] == '\n') i += 1;
             },
             else => {
-                const us_len = unicodeSeparatorLen(raw, i);
-                if (us_len > 0) {
-                    i += us_len; // line continuation \<LS> or \<PS>
+                const separator_len = unicodeSeparatorLen(raw, i);
+                if (separator_len > 0) {
+                    i += separator_len;
                 } else {
-                    try out.append(alloc, raw[i]); // any other escaped character is itself
+                    try out.append(alloc, raw[i]);
                     i += 1;
                 }
             },
@@ -286,9 +243,7 @@ pub fn decodeJsxEntities(
     try out.appendSlice(alloc, raw[run_start..]);
 }
 
-const JsxEntity = struct { value: u21, end: usize };
-
-fn jsxEntityAt(raw: []const u8, amp: usize) ?JsxEntity {
+fn jsxEntityAt(raw: []const u8, amp: usize) ?Decoded {
     std.debug.assert(raw[amp] == '&');
     var i = amp + 1;
     var value: u32 = 0;
@@ -348,7 +303,7 @@ fn pairAt(s: []const u8, i: usize) ?u21 {
     return 0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00);
 }
 
-/// Appends a code point as UTF-8, or as WTF-8 for a lone surrogate.
+// utf-8, or wtf-8 for a lone surrogate
 fn appendCodePoint(
     out: *std.ArrayList(u8),
     alloc: std.mem.Allocator,
@@ -377,9 +332,7 @@ pub fn hasOctalEscape(str: []const u8) bool {
         if (next >= str.len) break;
         switch (str[next]) {
             '1'...'9' => return true,
-            '0' => if (next + 1 < str.len and
-                str[next + 1] >= '0' and
-                str[next + 1] <= '9') return true,
+            '0' => if (next + 1 < str.len and std.ascii.isDigit(str[next + 1])) return true,
             else => {},
         }
         pos = next + 1;
@@ -397,201 +350,93 @@ inline fn hexVal(c: u8) ?u8 {
 const testing = std.testing;
 
 test "loneSurrogateAt reads only a well-formed surrogate" {
-    try std.testing.expectEqual(@as(?u21, 0xD83D), loneSurrogateAt("\xED\xA0\xBD", 0));
-    try std.testing.expectEqual(@as(?u21, 0xDFFF), loneSurrogateAt("\xED\xBF\xBF", 0));
-    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\x9F\xBF", 0));
-    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xF0\x9F\x98", 0));
-    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xA0\x41", 0));
-    try std.testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xA0", 0));
+    try testing.expectEqual(@as(?u21, 0xD83D), loneSurrogateAt("\xED\xA0\xBD", 0));
+    try testing.expectEqual(@as(?u21, 0xDFFF), loneSurrogateAt("\xED\xBF\xBF", 0));
+    try testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\x9F\xBF", 0));
+    try testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xF0\x9F\x98", 0));
+    try testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xA0\x41", 0));
+    try testing.expectEqual(@as(?u21, null), loneSurrogateAt("\xED\xA0", 0));
 }
 
-test "codePointAt ascii" {
-    const s = "hello";
-    const cp = try codePointAt(s, 0);
-    try testing.expectEqual(@as(u3, 1), cp.len);
-    try testing.expectEqual(@as(u21, 'h'), cp.value);
+test "codePointAt decodes every sequence length" {
+    const cases = [_]struct { source: []const u8, len: u3, value: u21 }{
+        .{ .source = "hello", .len = 1, .value = 'h' },
+        .{ .source = "ñ", .len = 2, .value = 0x00F1 },
+        .{ .source = "€", .len = 3, .value = 0x20AC },
+        .{ .source = "𐍈", .len = 4, .value = 0x10348 },
+    };
+    for (cases) |case| {
+        const cp = try codePointAt(case.source, 0);
+        try testing.expectEqual(case.len, cp.len);
+        try testing.expectEqual(case.value, cp.value);
+    }
 }
 
-test "codePointAt 2 byte utf8" {
-    const s = "ñ";
-    const cp = try codePointAt(s, 0);
-    try testing.expectEqual(@as(u3, 2), cp.len);
-    try testing.expectEqual(@as(u21, 0x00F1), cp.value);
-}
-
-test "codePointAt 3 byte utf8" {
-    const s = "€";
-    const cp = try codePointAt(s, 0);
-    try testing.expectEqual(@as(u3, 3), cp.len);
-    try testing.expectEqual(@as(u21, 0x20AC), cp.value);
-}
-
-test "codePointAt 4 byte utf8" {
-    const s = "𐍈";
-    const cp = try codePointAt(s, 0);
-    try testing.expectEqual(@as(u3, 4), cp.len);
-    try testing.expectEqual(@as(u21, 0x10348), cp.value);
-}
-
-test "codePointAt invalid leading byte" {
-    const s = &[_]u8{0xFF};
-    try testing.expectError(error.InvalidUtf8, codePointAt(s, 0));
-}
-
-test "codePointAt truncated 2-byte sequence" {
-    const s = &[_]u8{0xC3}; // lead byte for 2-byte sequence, no continuation
-    try testing.expectError(error.InvalidUtf8, codePointAt(s, 0));
-}
-
-test "codePointAt truncated 3-byte sequence" {
-    const s = &[_]u8{0xE2}; // lead byte for 3-byte sequence, no continuation
-    try testing.expectError(error.InvalidUtf8, codePointAt(s, 0));
-}
-
-test "codePointAt truncated 4-byte sequence" {
-    const s = &[_]u8{ 0xF0, 0x90 }; // lead byte for 4-byte sequence, only 2 bytes available
-    try testing.expectError(error.InvalidUtf8, codePointAt(s, 0));
+test "codePointAt rejects an invalid lead byte and truncated sequences" {
+    for ([_][]const u8{ "\xFF", "\xC3", "\xE2", "\xF0\x90" }) |source| {
+        try testing.expectError(error.InvalidUtf8, codePointAt(source, 0));
+    }
 }
 
 test "isOctalDigit" {
-    for ('0'..'8') |c| {
-        try testing.expect(isOctalDigit(@intCast(c)));
-    }
+    for ('0'..'8') |c| try testing.expect(isOctalDigit(@intCast(c)));
     try testing.expect(!isOctalDigit('8'));
     try testing.expect(!isOctalDigit('9'));
     try testing.expect(!isOctalDigit('a'));
 }
 
-test "unicodeSeparatorLen line separator u+2028" {
-    const s = &[_]u8{ 0xE2, 0x80, 0xA8 };
-    try testing.expectEqual(@as(u8, 3), unicodeSeparatorLen(s, 0));
+test "unicodeSeparatorLen" {
+    try testing.expectEqual(@as(u8, 3), unicodeSeparatorLen("\xE2\x80\xA8", 0));
+    try testing.expectEqual(@as(u8, 3), unicodeSeparatorLen("\xE2\x80\xA9", 0));
+    try testing.expectEqual(@as(u8, 0), unicodeSeparatorLen("\xE2\x80\xAA", 0));
+    try testing.expectEqual(@as(u8, 0), unicodeSeparatorLen("\xE2\x80", 0));
 }
 
-test "unicodeSeparatorLen paragraph separator u+2029" {
-    const s = &[_]u8{ 0xE2, 0x80, 0xA9 };
-    try testing.expectEqual(@as(u8, 3), unicodeSeparatorLen(s, 0));
-}
-
-test "unicodeSeparatorLen not a separator" {
-    const s = &[_]u8{ 0xE2, 0x80, 0xAA };
-    try testing.expectEqual(@as(u8, 0), unicodeSeparatorLen(s, 0));
-}
-
-test "unicodeSeparatorLen too short" {
-    const s = &[_]u8{ 0xE2, 0x80 };
-    try testing.expectEqual(@as(u8, 0), unicodeSeparatorLen(s, 0));
-}
-
-test "lineBreakLen lf cr crlf" {
+test "lineBreakLen" {
     try testing.expectEqual(@as(u8, 1), lineBreakLen("\n", 0));
     try testing.expectEqual(@as(u8, 1), lineBreakLen("\r", 0));
     try testing.expectEqual(@as(u8, 2), lineBreakLen("\r\n", 0));
     try testing.expectEqual(@as(u8, 1), lineBreakLen("\r\n", 1));
     try testing.expectEqual(@as(u8, 0), lineBreakLen("a", 0));
-}
-
-test "lineBreakLen unicode separators" {
-    try testing.expectEqual(@as(u8, 3), lineBreakLen(&[_]u8{ 0xE2, 0x80, 0xA8 }, 0));
-    try testing.expectEqual(@as(u8, 3), lineBreakLen(&[_]u8{ 0xE2, 0x80, 0xA9 }, 0));
+    try testing.expectEqual(@as(u8, 3), lineBreakLen("\xE2\x80\xA8", 0));
+    try testing.expectEqual(@as(u8, 3), lineBreakLen("\xE2\x80\xA9", 0));
     try testing.expectEqual(@as(u8, 0), lineBreakLen("€", 0));
 }
 
-test "parseOctal single digit" {
-    const r = parseOctal("5xyz", 0);
-    try testing.expectEqual(@as(u21, 5), r.value);
-    try testing.expectEqual(@as(usize, 1), r.end);
+fn expectDecoded(value: u21, end: usize, actual: ?Decoded) !void {
+    const decoded = actual orelse return error.TestExpectedDecoded;
+    try testing.expectEqual(value, decoded.value);
+    try testing.expectEqual(end, decoded.end);
 }
 
-test "parseOctal three digits starting with 0 to 3" {
-    const r = parseOctal("377", 0);
-    try testing.expectEqual(@as(u21, 0o377), r.value);
-    try testing.expectEqual(@as(usize, 3), r.end);
+test "parseOctal takes three digits after 0 to 3, two after 4 to 7" {
+    try expectDecoded(5, 1, parseOctal("5xyz", 0));
+    try expectDecoded(0o377, 3, parseOctal("377", 0));
+    try expectDecoded(0o77, 2, parseOctal("77", 0));
+    try expectDecoded(0o12, 2, parseOctal("129", 0));
 }
 
-test "parseOctal two digits starting with 4 to 7" {
-    const r = parseOctal("77", 0);
-    try testing.expectEqual(@as(u21, 0o77), r.value);
-    try testing.expectEqual(@as(usize, 2), r.end);
-}
-
-test "parseOctal stops at non octal" {
-    const r = parseOctal("129", 0);
-    try testing.expectEqual(@as(u21, 0o12), r.value);
-    try testing.expectEqual(@as(usize, 2), r.end);
-}
-
-test "parseHex2 valid" {
-    const r = parseHex2("FF", 0).?;
-    try testing.expectEqual(@as(u21, 0xFF), r.value);
-    try testing.expectEqual(@as(usize, 2), r.end);
-}
-
-test "parseHex2 lowercase" {
-    const r = parseHex2("ab", 0).?;
-    try testing.expectEqual(@as(u21, 0xAB), r.value);
-}
-
-test "parseHex2 too short" {
+test "parseHex2 and parseHex4 read a fixed digit count" {
+    try expectDecoded(0xFF, 2, parseHex2("FF", 0));
+    try expectDecoded(0xAB, 2, parseHex2("ab", 0));
     try testing.expect(parseHex2("F", 0) == null);
-}
-
-test "parseHex2 invalid hex char" {
     try testing.expect(parseHex2("GG", 0) == null);
-}
-
-test "parseHex4 valid" {
-    const r = parseHex4("00E9rest", 0).?;
-    try testing.expectEqual(@as(u21, 0x00E9), r.value);
-    try testing.expectEqual(@as(usize, 4), r.end);
-}
-
-test "parseHex4 too short" {
+    try expectDecoded(0x00E9, 4, parseHex4("00E9rest", 0));
     try testing.expect(parseHex4("00E", 0) == null);
 }
 
-test "parseHexVariable valid" {
-    const r = parseHexVariable("1F600", 0, 6).?;
-    try testing.expectEqual(@as(u21, 0x1F600), r.value);
-    try testing.expectEqual(@as(usize, 5), r.end);
-}
-
-test "parseHexVariable exceeds max codepoint" {
+test "parseHexVariable stops at the digit limit and past U+10FFFF" {
+    try expectDecoded(0x1F600, 5, parseHexVariable("1F600", 0, 6));
+    try expectDecoded(0xAB, 2, parseHexVariable("ABCDEF", 0, 2));
     try testing.expect(parseHexVariable("FFFFFF", 0, 6) == null);
-}
-
-test "parseHexVariable no digits" {
     try testing.expect(parseHexVariable("xyz", 0, 6) == null);
 }
 
-test "parseHexVariable respects max digits" {
-    const r = parseHexVariable("ABCDEF", 0, 2).?;
-    try testing.expectEqual(@as(u21, 0xAB), r.value);
-    try testing.expectEqual(@as(usize, 2), r.end);
-}
-
-test "parseUnicodeEscape 4 digit form" {
-    const r = parseUnicodeEscape("00E9rest", 0).?;
-    try testing.expectEqual(@as(u21, 0x00E9), r.value);
-    try testing.expectEqual(@as(usize, 4), r.end);
-}
-
-test "parseUnicodeEscape braced form" {
-    const r = parseUnicodeEscape("{1F600}!", 0).?;
-    try testing.expectEqual(@as(u21, 0x1F600), r.value);
-    try testing.expectEqual(@as(usize, 7), r.end);
-}
-
-test "parseUnicodeEscape braced form single digit" {
-    const r = parseUnicodeEscape("{A}z", 0).?;
-    try testing.expectEqual(@as(u21, 0xA), r.value);
-    try testing.expectEqual(@as(usize, 3), r.end);
-}
-
-test "parseUnicodeEscape missing closing brace" {
+test "parseUnicodeEscape reads the braced and four digit forms" {
+    try expectDecoded(0x00E9, 4, parseUnicodeEscape("00E9rest", 0));
+    try expectDecoded(0x1F600, 7, parseUnicodeEscape("{1F600}!", 0));
+    try expectDecoded(0xA, 3, parseUnicodeEscape("{A}z", 0));
     try testing.expect(parseUnicodeEscape("{1F600", 0) == null);
-}
-
-test "parseUnicodeEscape invalid hex in 4 digit" {
     try testing.expect(parseUnicodeEscape("GHIJ", 0) == null);
 }
 
@@ -607,79 +452,49 @@ test "hexVal" {
     try testing.expect(hexVal(' ') == null);
 }
 
-// decodeStringEscapes tests
-
-fn decode(input: []const u8) ![]const u8 {
+fn expectDecode(input: []const u8, expected: []const u8) !void {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(testing.allocator);
     try decodeStringEscapes(input, &out, testing.allocator);
-    return try testing.allocator.dupe(u8, out.items);
+    try testing.expectEqualSlices(u8, expected, out.items);
 }
 
-fn expectDecode(input: []const u8, expected: []const u8) !void {
-    const result = try decode(input);
-    defer testing.allocator.free(result);
-    try testing.expectEqualSlices(u8, expected, result);
-}
-
-test "decodeStringEscapes no escapes" {
+test "decodeStringEscapes passes text without escapes through" {
     try expectDecode("hello world", "hello world");
-}
-
-test "decodeStringEscapes empty" {
     try expectDecode("", "");
 }
 
-test "decodeStringEscapes standard escapes" {
+test "decodeStringEscapes single character escapes" {
     try expectDecode("a\\nb\\tc", "a\nb\tc");
     try expectDecode("\\r\\n", "\r\n");
-    try expectDecode("\\b\\f\\v", &[_]u8{ 0x08, 0x0C, 0x0B });
-}
-
-test "decodeStringEscapes backslash and quote escapes" {
+    try expectDecode("\\b\\f\\v", "\x08\x0C\x0B");
     try expectDecode("\\\\", "\\");
     try expectDecode("\\'", "'");
     try expectDecode("\\\"", "\"");
-}
-
-test "decodeStringEscapes null escape" {
     try expectDecode("a\\0b", "a\x00b");
 }
 
 test "decodeStringEscapes octal escapes" {
-    // \0 followed by digit is octal
-    try expectDecode("\\01", &[_]u8{0o1});
-    // \1-\7 are octal
-    try expectDecode("\\101", "A"); // 0o101 = 65 = 'A'
-    try expectDecode("\\7", &[_]u8{7});
-    // multi-digit octal
-    try expectDecode("\\377", &[_]u8{ 0xC3, 0xBF }); // 0o377 = 255 = U+00FF -> 2-byte UTF-8
+    try expectDecode("\\01", "\x01");
+    try expectDecode("\\101", "A");
+    try expectDecode("\\7", "\x07");
+    try expectDecode("\\377", "\xC3\xBF");
 }
 
-test "decodeStringEscapes hex escapes" {
+test "decodeStringEscapes hex and unicode escapes" {
     try expectDecode("\\x41", "A");
     try expectDecode("\\x61\\x62\\x63", "abc");
-    try expectDecode("\\xff", &[_]u8{ 0xC3, 0xBF }); // U+00FF -> 2-byte UTF-8
-}
-
-test "decodeStringEscapes unicode escapes" {
+    try expectDecode("\\xff", "\xC3\xBF");
     try expectDecode("\\u0041", "A");
-    try expectDecode("\\u00E9", "\xC3\xA9"); // e with acute
-    try expectDecode("\\u4E16\\u754C", "\xE4\xB8\x96\xE7\x95\x8C"); // 世界
-}
-
-test "decodeStringEscapes braced unicode escapes" {
+    try expectDecode("\\u00E9", "\xC3\xA9");
+    try expectDecode("\\u4E16\\u754C", "\xE4\xB8\x96\xE7\x95\x8C");
     try expectDecode("\\u{41}", "A");
-    try expectDecode("\\u{1F600}", "\xF0\x9F\x98\x80"); // grinning face emoji
-    try expectDecode("\\u{0}", &[_]u8{0});
-}
-
-test "decodeStringEscapes surrogate pairs" {
-    // \uD83D\uDCA9 = U+1F4A9 (pile of poo)
-    try expectDecode("\\uD83D\\uDCA9", "\xF0\x9F\x92\xA9");
+    try expectDecode("\\u{1F600}", "\xF0\x9F\x98\x80");
+    try expectDecode("\\u{0}", "\x00");
 }
 
 test "decodeStringEscapes joins a surrogate pair however it is written" {
+    try expectDecode("\\uD83D\\uDCA9", "\xF0\x9F\x92\xA9");
     try expectDecode("\\uD83D\\\xED\xB0\x80", "\xF0\x9F\x90\x80");
     try expectDecode("\xED\xA0\xBD\\uDC00", "\xF0\x9F\x90\x80");
     try expectDecode("\\uD83D\\\n\\uDC00", "\xF0\x9F\x90\x80");
@@ -687,52 +502,22 @@ test "decodeStringEscapes joins a surrogate pair however it is written" {
     try expectDecode("\\uDC00\\uD83D", "\xED\xB0\x80\xED\xA0\xBD");
 }
 
-test "decodeStringEscapes lone high surrogate" {
-    const result = try decode("\\uD800");
-    defer testing.allocator.free(result);
-    // WTF-8: ED A0 80
-    try testing.expectEqual(@as(usize, 3), result.len);
-    try testing.expectEqual(@as(u8, 0xED), result[0]);
-    try testing.expectEqual(@as(u8, 0xA0), result[1]);
-    try testing.expectEqual(@as(u8, 0x80), result[2]);
+test "decodeStringEscapes keeps a lone surrogate as wtf-8" {
+    try expectDecode("\\uD800", "\xED\xA0\x80");
+    try expectDecode("\\uDC00", "\xED\xB0\x80");
 }
 
-test "decodeStringEscapes lone low surrogate" {
-    const result = try decode("\\uDC00");
-    defer testing.allocator.free(result);
-    // WTF-8: ED B0 80
-    try testing.expectEqual(@as(usize, 3), result.len);
-    try testing.expectEqual(@as(u8, 0xED), result[0]);
-    try testing.expectEqual(@as(u8, 0xB0), result[1]);
-    try testing.expectEqual(@as(u8, 0x80), result[2]);
-}
-
-test "decodeStringEscapes line continuation lf" {
+test "decodeStringEscapes line continuations and raw line breaks" {
     try expectDecode("hello\\\nworld", "helloworld");
-}
-
-test "decodeStringEscapes line continuation crlf" {
     try expectDecode("hello\\\r\nworld", "helloworld");
-}
-
-test "decodeStringEscapes line continuation cr" {
     try expectDecode("hello\\\rworld", "helloworld");
-}
-
-test "decodeStringEscapes raw cr normalization" {
-    // standalone \r -> \n
     try expectDecode("a\rb", "a\nb");
-    // \r\n -> \n
     try expectDecode("a\r\nb", "a\nb");
-    // mixed
     try expectDecode("\r\n\r", "\n\n");
 }
 
-test "decodeStringEscapes mixed escapes" {
+test "decodeStringEscapes mixed escapes and a trailing backslash" {
     try expectDecode("hello\\nworld\\t\\u0021", "hello\nworld\t!");
     try expectDecode("\\x48\\x65\\x6C\\x6C\\x6F", "Hello");
-}
-
-test "decodeStringEscapes trailing backslash" {
     try expectDecode("abc\\", "abc");
 }

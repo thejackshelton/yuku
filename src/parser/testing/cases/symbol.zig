@@ -10,18 +10,9 @@ const SymbolId = traverser.semantic.SymbolId;
 
 const testing = std.testing;
 
-fn analyze(source: []const u8, opts: parser.Options) !helpers.Analyzed {
-    return helpers.analyze(testing.allocator, source, opts);
-}
-
 test "lookup agrees with resolution when a var passes through a catch scope" {
-    var a = try helpers.analyzeAllowErrors(
-        testing.allocator,
-        "try {} catch (e) { { var e; e; } }",
-        .{ .source_type = .script },
-    );
+    var a = try helpers.analyze("try {} catch (e) { { var e; e; } }", .{ .source_type = .script });
     defer a.deinit();
-    try testing.expect(!a.tree.hasErrors());
 
     var buf: [4]Semantic.SymbolEntry = undefined;
     const es = a.symbolsNamed("e", &buf);
@@ -38,7 +29,7 @@ test "lookup agrees with resolution when a var passes through a catch scope" {
 }
 
 test "symbolOf answers for both declaration and reference nodes" {
-    var a = try analyze("let q = 1; q;", .{});
+    var a = try helpers.analyze("let q = 1; q;", .{});
     defer a.deinit();
 
     const q = try a.symbolNamed("q");
@@ -58,7 +49,7 @@ test "symbolOf answers for both declaration and reference nodes" {
 }
 
 test "parentOf and ancestors walk the structural tree" {
-    var a = try analyze("let q = 1;", .{});
+    var a = try helpers.analyze("let q = 1;", .{});
     defer a.deinit();
 
     const binding_node = try a.bindingNamed("q");
@@ -78,7 +69,7 @@ test "parentOf and ancestors walk the structural tree" {
 }
 
 test "lookup walks the scope chain, binding does not" {
-    var a = try analyze("let outer = 1; { let inner = 2; }", .{});
+    var a = try helpers.analyze("let outer = 1; { let inner = 2; }", .{});
     defer a.deinit();
 
     const outer = try a.symbolNamed("outer");
@@ -94,7 +85,7 @@ test "lookup walks the scope chain, binding does not" {
 }
 
 test "iterators yield ids that round-trip through the accessors" {
-    var a = try analyze("let x = 1; function f(y) { x; y; }", .{});
+    var a = try helpers.analyze("let x = 1; function f(y) { x; y; }", .{});
     defer a.deinit();
 
     var scope_count: usize = 0;
@@ -111,10 +102,7 @@ test "iterators yield ids that round-trip through the accessors" {
     var sym_it = a.sem.iterSymbols();
     while (sym_it.next()) |entry| {
         symbol_count += 1;
-        try testing.expectEqual(
-            a.sem.symbol(entry.id).name,
-            entry.symbol.name,
-        );
+        try testing.expectEqual(a.sem.symbol(entry.id).name, entry.symbol.name);
     }
     try testing.expectEqual(a.sem.symbols.len, symbol_count);
 
@@ -122,17 +110,14 @@ test "iterators yield ids that round-trip through the accessors" {
     var ref_it = a.sem.iterReferences();
     while (ref_it.next()) |entry| {
         ref_count += 1;
-        try testing.expectEqual(
-            a.sem.reference(entry.id).node,
-            entry.reference.node,
-        );
+        try testing.expectEqual(a.sem.reference(entry.id).node, entry.reference.node);
         try testing.expectEqual(entry.id, a.sem.referenceOf(entry.reference.node).?);
     }
     try testing.expectEqual(a.sem.references.len, ref_count);
 }
 
 test "every declared symbol is reachable through its scope's bindings" {
-    var a = try analyze("let x = 1; function f(y) { var z; }", .{});
+    var a = try helpers.analyze("let x = 1; function f(y) { var z; }", .{});
     defer a.deinit();
 
     var sym_it = a.sem.iterSymbols();
@@ -153,14 +138,12 @@ const CtxProbeVisitor = struct {
     pub fn enter_identifier_reference(
         self: *CtxProbeVisitor,
         id: ast.IdentifierReference,
-        index: ast.NodeIndex,
+        _: ast.NodeIndex,
         ctx: *traverser.semantic.Ctx,
     ) traverser.Action {
-        _ = index;
-        const name = ctx.tree.string(id.name);
-        if (std.mem.eql(u8, name, "probe")) {
+        if (std.mem.eql(u8, ctx.tree.string(id.name), "probe")) {
             self.saw_probe = true;
-            self.checkProbe(ctx) catch |err| {
+            checkProbe(ctx) catch |err| {
                 self.failure = err;
             };
         }
@@ -169,26 +152,18 @@ const CtxProbeVisitor = struct {
 
     pub fn enter_ts_type_reference(
         self: *CtxProbeVisitor,
-        ref: ast.TSTypeReference,
-        index: ast.NodeIndex,
+        _: ast.TSTypeReference,
+        _: ast.NodeIndex,
         ctx: *traverser.semantic.Ctx,
     ) traverser.Action {
-        _ = ref;
-        _ = index;
         self.saw_type_ref = true;
-        self.check(ctx.inTypePosition()) catch |err| {
+        testing.expect(ctx.inTypePosition()) catch |err| {
             self.failure = err;
         };
         return .proceed;
     }
 
-    fn check(self: *CtxProbeVisitor, ok: bool) !void {
-        _ = self;
-        try testing.expect(ok);
-    }
-
-    fn checkProbe(self: *CtxProbeVisitor, ctx: *traverser.semantic.Ctx) !void {
-        _ = self;
+    fn checkProbe(ctx: *traverser.semantic.Ctx) !void {
         try testing.expect(!ctx.inTypePosition());
         try testing.expect(ctx.inTsNamespace());
 
@@ -228,7 +203,7 @@ test "the semantic Ctx exposes type position, namespace state, and the tracker" 
 test "module records collect an export pattern of any depth" {
     const depth = 300;
     const pattern = helpers.repeat("[", depth) ++ "a" ++ helpers.repeat("]", depth);
-    var a = try analyze("export const " ++ pattern ++ " = x;", .{});
+    var a = try helpers.analyze("export const " ++ pattern ++ " = x;", .{});
     defer a.deinit();
     const records = try semantic.module_record.collect(&a.tree, &a.sem);
     try testing.expectEqual(@as(usize, 1), records.exports.len);

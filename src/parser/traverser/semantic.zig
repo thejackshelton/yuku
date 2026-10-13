@@ -17,43 +17,52 @@ pub const Symbol = bi.Symbol;
 pub const Reference = bi.Reference;
 pub const Semantic = bi.Semantic;
 pub const SymbolTracker = bi.SymbolTracker;
+pub const Mode = bi.Mode;
 
-/// Walk context combining the path stack, scope tracker, and symbol tracker.
+/// Traverser context that tracks the node path, scopes, and symbols.
 pub const Ctx = struct {
     tree: *const ast.Tree,
+    mode: Mode,
     path: NodePath = .{},
     scope: ScopeTracker,
     symbols: SymbolTracker,
     type_position_depth: u32 = 0,
+    // empty in a `check` walk
     node_scopes: []ScopeId,
     node_parents: []ast.NodeIndex,
 
-    pub fn init(tree: *ast.Tree) Allocator.Error!Ctx {
-        const node_scopes = try tree.allocator().alloc(ScopeId, tree.nodes.len);
+    pub fn init(tree: *ast.Tree, mode: Mode) Allocator.Error!Ctx {
+        const node_count: usize = switch (mode) {
+            .check => 0,
+            .analyze => tree.nodes.len,
+        };
+        const node_scopes = try tree.allocator().alloc(ScopeId, node_count);
         @memset(node_scopes, .root);
-        const node_parents = try tree.allocator().alloc(ast.NodeIndex, tree.nodes.len);
+        const node_parents = try tree.allocator().alloc(ast.NodeIndex, node_count);
         @memset(node_parents, .null);
         return .{
             .tree = tree,
+            .mode = mode,
             .scope = try ScopeTracker.init(tree),
-            .symbols = try SymbolTracker.init(tree),
+            .symbols = try SymbolTracker.init(tree, mode),
             .node_scopes = node_scopes,
             .node_parents = node_parents,
         };
     }
 
-    /// True when the walker is currently inside a TS type-only subtree.
+    /// The `Semantic` model of a finished `analyze` walk.
+    pub fn finalize(self: *Ctx) Allocator.Error!Semantic {
+        std.debug.assert(self.mode == .analyze);
+        std.debug.assert(self.path.depth() == 0);
+        return self.symbols.finalize(self.scope.toScopeTree(), self.node_scopes, self.node_parents);
+    }
+
+    /// Whether the walk is inside a TypeScript type-only subtree.
     pub inline fn inTypePosition(self: *const Ctx) bool {
         return self.type_position_depth > 0;
     }
 
-    /// The parent of `node`, or `null` at the root.
-    pub inline fn parentOf(self: *const Ctx, node: ast.NodeIndex) ?ast.NodeIndex {
-        const parent = self.node_parents[@backingInt(node)];
-        return if (parent != .null) parent else null;
-    }
-
-    /// True when the walker is currently inside a TS namespace body.
+    /// Whether the walk is inside a TypeScript namespace body.
     pub inline fn inTsNamespace(self: *const Ctx) bool {
         var it = self.scope.ancestors(self.scope.current);
         while (it.next()) |id| {
@@ -67,8 +76,13 @@ pub const Ctx = struct {
         const parent = self.path.parent() orelse .null;
         try self.scope.enter(index, parent, data);
 
-        self.node_scopes[@backingInt(index)] = self.scope.current;
-        self.node_parents[@backingInt(index)] = parent;
+        switch (self.mode) {
+            .check => {},
+            .analyze => {
+                self.node_scopes[@backingInt(index)] = self.scope.current;
+                self.node_parents[@backingInt(index)] = parent;
+            },
+        }
 
         if (data.isTypeContext()) self.type_position_depth += 1;
 
@@ -80,21 +94,22 @@ pub const Ctx = struct {
         index: ast.NodeIndex,
         data: ast.NodeData,
     ) Allocator.Error!void {
-        const is_write = data == .identifier_reference and
-            isWriteTarget(self.tree, &self.path);
-        const position: RefPosition = switch (data) {
-            .identifier_reference, .binding_identifier => refPosition(
-                self.tree,
-                &self.path,
-                self.inTypePosition(),
-            ),
-            else => .{},
-        };
-        try self.symbols.declareBindings(index, data, &self.scope, .{
-            .is_write = is_write,
-            .space = position.space,
-            .type_position = position.type_position,
-        });
+        try self.symbols.declareBindings(index, data, &self.scope, self.inTypePosition());
+        switch (self.mode) {
+            .check => {},
+            .analyze => {
+                const flags = self.identifierFlags(data);
+                try self.symbols.addReferences(index, data, &self.scope, flags);
+            },
+        }
+    }
+
+    // how the identifier at the top of the path uses its name
+    fn identifierFlags(self: *const Ctx, data: ast.NodeData) Reference.Flags {
+        if (data != .identifier_reference) return .{};
+        var flags = refPosition(self.tree, &self.path, self.inTypePosition());
+        flags.write = isWriteTarget(self.tree, &self.path);
+        return flags;
     }
 
     pub inline fn exit(self: *Ctx, index: ast.NodeIndex, data: ast.NodeData) void {
@@ -108,18 +123,22 @@ pub const Ctx = struct {
     }
 };
 
-pub const RefPosition = struct {
-    space: Reference.Space = .value,
-    type_position: bool = false,
-};
+/// Walks the tree tracking the node path, scopes, and symbols, and returns the
+/// `Semantic` model.
+pub fn traverse(comptime V: type, tree: *ast.Tree, visitor: *V) Allocator.Error!Semantic {
+    std.debug.assert(tree.root != .null);
+    var ctx = try Ctx.init(tree, .analyze);
+    var layer = wk.Layer(Ctx, V){ .inner = visitor };
+    try wk.walk(Ctx, @TypeOf(layer), &layer, &ctx);
+    return ctx.finalize();
+}
 
-/// Where the identifier at the top of `path` resolves, and whether its use is erased with
-/// the types.
-pub fn refPosition(
+// where the identifier at the top of `path` resolves, and whether its use is erased with the types
+fn refPosition(
     tree: *const ast.Tree,
     path: *const NodePath,
     in_type_position: bool,
-) RefPosition {
+) Reference.Flags {
     std.debug.assert(path.depth() > 0);
 
     // crossing a qualified name makes this the qualifier of a dotted name
@@ -143,9 +162,7 @@ pub fn refPosition(
                 child = parent;
                 continue;
             },
-            // computed keys of type members are value positions
-            //   interface I { [key]: string }
-            //   //             ^ resolves as typeof, not type
+            // a computed key of a type member is a value use, `[key]: string`
             inline .ts_property_signature, .ts_method_signature, .binding_property => |member| {
                 if (member.computed and member.key == child) {
                     if (in_type_position) return .{ .space = .typeof, .type_position = true };
@@ -178,8 +195,8 @@ pub fn refPosition(
     return .{};
 }
 
-/// https://tc39.es/ecma262/#sec-static-semantics-assignmenttargettype
-pub fn isWriteTarget(tree: *const ast.Tree, path: *const NodePath) bool {
+// https://tc39.es/ecma262/#sec-static-semantics-assignmenttargettype
+fn isWriteTarget(tree: *const ast.Tree, path: *const NodePath) bool {
     std.debug.assert(path.depth() > 0);
 
     var child = path.ancestor(0) orelse return false;
@@ -216,18 +233,4 @@ pub fn isWriteTarget(tree: *const ast.Tree, path: *const NodePath) bool {
         }
     }
     return false;
-}
-
-/// Walks the tree with path, scope, and symbol tracking and returns the
-/// resolved `Semantic` model.
-pub fn traverse(comptime V: type, tree: *ast.Tree, visitor: *V) Allocator.Error!Semantic {
-    std.debug.assert(tree.root != .null);
-    var ctx = try Ctx.init(tree);
-    var layer = wk.Layer(Ctx, V){ .inner = visitor };
-    try wk.walk(Ctx, wk.Layer(Ctx, V), &layer, &ctx);
-    return ctx.symbols.finalize(
-        ctx.scope.toScopeTree(),
-        ctx.node_scopes,
-        ctx.node_parents,
-    );
 }

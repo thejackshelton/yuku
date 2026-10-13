@@ -91,7 +91,7 @@ test "the path holds every ancestor past the walk's recursion" {
 const CountingVisitor = struct {
     enters: usize = 0,
     exits: usize = 0,
-    trigger: ?std.meta.Tag(ast.NodeData) = null,
+    trigger: ?helpers.NodeTag = null,
     action_on_trigger: Action = .proceed,
     triggered: usize = 0,
     seen_binding_names: std.ArrayList([]const u8) = .empty,
@@ -100,10 +100,9 @@ const CountingVisitor = struct {
     pub fn enter_node(
         self: *CountingVisitor,
         data: ast.NodeData,
-        index: ast.NodeIndex,
+        _: ast.NodeIndex,
         ctx: *Ctx,
     ) Allocator.Error!Action {
-        _ = index;
         self.enters += 1;
         if (data == .binding_identifier) {
             const name = ctx.tree.string(data.binding_identifier.name);
@@ -118,15 +117,7 @@ const CountingVisitor = struct {
         return .proceed;
     }
 
-    pub fn exit_node(
-        self: *CountingVisitor,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
-    ) void {
-        _ = data;
-        _ = index;
-        _ = ctx;
+    pub fn exit_node(self: *CountingVisitor, _: ast.NodeData, _: ast.NodeIndex, _: *Ctx) void {
         self.exits += 1;
     }
 
@@ -263,11 +254,9 @@ const TypedHookVisitor = struct {
     pub fn enter_node(
         self: *TypedHookVisitor,
         data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
+        _: ast.NodeIndex,
+        _: *Ctx,
     ) Allocator.Error!Action {
-        _ = index;
-        _ = ctx;
         if (data == .function) try self.log.append("enter_node(function)");
         return .proceed;
     }
@@ -275,48 +264,28 @@ const TypedHookVisitor = struct {
     pub fn enter_function(
         self: *TypedHookVisitor,
         func: ast.Function,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
+        _: ast.NodeIndex,
+        _: *Ctx,
     ) Allocator.Error!Action {
-        _ = index;
-        _ = ctx;
         if (func.id != .null) try self.log.append("enter_function");
         return .proceed;
     }
 
     pub fn enter_binding_identifier(
         self: *TypedHookVisitor,
-        id: ast.BindingIdentifier,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
+        _: ast.BindingIdentifier,
+        _: ast.NodeIndex,
+        _: *Ctx,
     ) Allocator.Error!Action {
-        _ = id;
-        _ = index;
-        _ = ctx;
         try self.log.append("enter_binding_identifier");
         return .proceed;
     }
 
-    pub fn exit_function(
-        self: *TypedHookVisitor,
-        func: ast.Function,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
-    ) void {
-        _ = func;
-        _ = index;
-        _ = ctx;
+    pub fn exit_function(self: *TypedHookVisitor, _: ast.Function, _: ast.NodeIndex, _: *Ctx) void {
         self.log.append("exit_function") catch unreachable;
     }
 
-    pub fn exit_node(
-        self: *TypedHookVisitor,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
-    ) void {
-        _ = index;
-        _ = ctx;
+    pub fn exit_node(self: *TypedHookVisitor, data: ast.NodeData, _: ast.NodeIndex, _: *Ctx) void {
         if (data == .function) self.log.append("exit_node(function)") catch unreachable;
     }
 };
@@ -345,40 +314,30 @@ const SkippingTypedVisitor = struct {
     function_exits: usize = 0,
 
     pub fn enter_function(
-        self: *SkippingTypedVisitor,
-        func: ast.Function,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
+        _: *SkippingTypedVisitor,
+        _: ast.Function,
+        _: ast.NodeIndex,
+        _: *Ctx,
     ) Action {
-        _ = self;
-        _ = func;
-        _ = index;
-        _ = ctx;
         return .skip;
     }
 
     pub fn enter_binding_identifier(
         self: *SkippingTypedVisitor,
-        id: ast.BindingIdentifier,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
+        _: ast.BindingIdentifier,
+        _: ast.NodeIndex,
+        _: *Ctx,
     ) Action {
-        _ = id;
-        _ = index;
-        _ = ctx;
         self.entered_bindings += 1;
         return .proceed;
     }
 
     pub fn exit_function(
         self: *SkippingTypedVisitor,
-        func: ast.Function,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
+        _: ast.Function,
+        _: ast.NodeIndex,
+        _: *Ctx,
     ) void {
-        _ = func;
-        _ = index;
-        _ = ctx;
         self.function_exits += 1;
     }
 };
@@ -399,56 +358,42 @@ const LayerCtx = struct {
     tree: *const ast.Tree,
     log: *EventLog,
 
-    pub fn enter(self: *LayerCtx, index: ast.NodeIndex, data: ast.NodeData) Allocator.Error!void {
-        _ = index;
-        _ = data;
+    pub fn enter(self: *LayerCtx, _: ast.NodeIndex, _: ast.NodeData) Allocator.Error!void {
         try self.log.append("ctx.enter");
     }
 
-    pub fn post_enter(
-        self: *LayerCtx,
-        index: ast.NodeIndex,
-        data: ast.NodeData,
-    ) Allocator.Error!void {
-        _ = index;
-        _ = data;
+    pub fn post_enter(self: *LayerCtx, _: ast.NodeIndex, _: ast.NodeData) Allocator.Error!void {
         try self.log.append("ctx.post_enter");
     }
 
-    pub fn exit(self: *LayerCtx, _: ast.NodeIndex, data: ast.NodeData) void {
-        _ = data;
+    pub fn exit(self: *LayerCtx, _: ast.NodeIndex, _: ast.NodeData) void {
         self.log.append("ctx.exit") catch unreachable;
     }
 };
 
-const LayerUserVisitor = struct {
+const LayerVisitor = struct {
     log: *EventLog,
+    skip: ?helpers.NodeTag = null,
 
     pub fn enter_node(
-        self: *LayerUserVisitor,
+        self: *LayerVisitor,
         data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *LayerCtx,
+        _: ast.NodeIndex,
+        _: *LayerCtx,
     ) Allocator.Error!Action {
-        _ = data;
-        _ = index;
-        _ = ctx;
         try self.log.append("user.enter");
+        if (self.skip) |tag| {
+            if (std.meta.activeTag(data) == tag) return .skip;
+        }
         return .proceed;
     }
 
-    pub fn exit_node(
-        self: *LayerUserVisitor,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *LayerCtx,
-    ) void {
-        _ = data;
-        _ = index;
-        _ = ctx;
+    pub fn exit_node(self: *LayerVisitor, _: ast.NodeData, _: ast.NodeIndex, _: *LayerCtx) void {
         self.log.append("user.exit") catch unreachable;
     }
 };
+
+const Layered = traverser.Layer(LayerCtx, LayerVisitor);
 
 test "Layer runs ctx.enter, user hooks, ctx.post_enter, user exit, ctx.exit" {
     var tree = try parseModule("a;");
@@ -456,10 +401,10 @@ test "Layer runs ctx.enter, user hooks, ctx.post_enter, user exit, ctx.exit" {
 
     var log = EventLog{ .gpa = testing.allocator };
     defer log.deinit();
-    var visitor = LayerUserVisitor{ .log = &log };
+    var visitor = LayerVisitor{ .log = &log };
     var ctx = LayerCtx{ .tree = &tree, .log = &log };
-    var layer = traverser.Layer(LayerCtx, LayerUserVisitor){ .inner = &visitor };
-    try traverser.walk(LayerCtx, traverser.Layer(LayerCtx, LayerUserVisitor), &layer, &ctx);
+    var layer = Layered{ .inner = &visitor };
+    try traverser.walk(LayerCtx, Layered, &layer, &ctx);
 
     const expected = [_][]const u8{
         "ctx.enter", "user.enter", "ctx.post_enter",
@@ -474,44 +419,16 @@ test "Layer runs ctx.enter, user hooks, ctx.post_enter, user exit, ctx.exit" {
     }
 }
 
-const LayerSkippingVisitor = struct {
-    log: *EventLog,
-
-    pub fn enter_node(
-        self: *LayerSkippingVisitor,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *LayerCtx,
-    ) Allocator.Error!Action {
-        _ = index;
-        _ = ctx;
-        try self.log.append("user.enter");
-        return if (data == .expression_statement) .skip else .proceed;
-    }
-
-    pub fn exit_node(
-        self: *LayerSkippingVisitor,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *LayerCtx,
-    ) void {
-        _ = data;
-        _ = index;
-        _ = ctx;
-        self.log.append("user.exit") catch unreachable;
-    }
-};
-
 test "Layer keeps ctx enter/exit balanced when the user visitor skips" {
     var tree = try parseModule("a;");
     defer tree.deinit();
 
     var log = EventLog{ .gpa = testing.allocator };
     defer log.deinit();
-    var visitor = LayerSkippingVisitor{ .log = &log };
+    var visitor = LayerVisitor{ .log = &log, .skip = .expression_statement };
     var ctx = LayerCtx{ .tree = &tree, .log = &log };
-    var layer = traverser.Layer(LayerCtx, LayerSkippingVisitor){ .inner = &visitor };
-    try traverser.walk(LayerCtx, traverser.Layer(LayerCtx, LayerSkippingVisitor), &layer, &ctx);
+    var layer = Layered{ .inner = &visitor };
+    try traverser.walk(LayerCtx, Layered, &layer, &ctx);
 
     var ctx_enters: usize = 0;
     var ctx_exits: usize = 0;
@@ -532,24 +449,18 @@ const PathCheckVisitor = struct {
 
     pub fn enter_identifier_reference(
         self: *PathCheckVisitor,
-        id: ast.IdentifierReference,
+        _: ast.IdentifierReference,
         index: ast.NodeIndex,
         ctx: *traverser.basic.Ctx,
     ) Action {
-        _ = id;
         self.checked = true;
-        self.check(index, ctx) catch |err| {
+        check(index, ctx) catch |err| {
             self.failure = err;
         };
         return .proceed;
     }
 
-    fn check(
-        self: *PathCheckVisitor,
-        index: ast.NodeIndex,
-        ctx: *traverser.basic.Ctx,
-    ) !void {
-        _ = self;
+    fn check(index: ast.NodeIndex, ctx: *traverser.basic.Ctx) !void {
         try testing.expectEqual(@as(usize, 5), ctx.path.depth());
         try testing.expectEqual(index, ctx.path.ancestor(0).?);
         try testing.expect(ctx.tree.data(ctx.path.parent().?) == .expression_statement);
@@ -578,25 +489,21 @@ const FoldVisitor = struct {
     literal_enters: usize = 0,
 
     pub fn enter_binary_expression(
-        self: *FoldVisitor,
+        _: *FoldVisitor,
         expr: ast.BinaryExpression,
         index: ast.NodeIndex,
         ctx: *traverser.transform.Ctx,
     ) Action {
-        _ = self;
         ctx.tree.setData(index, ctx.tree.data(expr.left));
         return .proceed;
     }
 
     pub fn enter_numeric_literal(
         self: *FoldVisitor,
-        lit: ast.NumericLiteral,
-        index: ast.NodeIndex,
-        ctx: *traverser.transform.Ctx,
+        _: ast.NumericLiteral,
+        _: ast.NodeIndex,
+        _: *traverser.transform.Ctx,
     ) Action {
-        _ = lit;
-        _ = index;
-        _ = ctx;
         self.literal_enters += 1;
         return .proceed;
     }
@@ -628,20 +535,15 @@ const ExtrasGrowingVisitor = struct {
     pub fn enter_identifier_reference(
         self: *ExtrasGrowingVisitor,
         id: ast.IdentifierReference,
-        index: ast.NodeIndex,
+        _: ast.NodeIndex,
         ctx: *traverser.transform.Ctx,
     ) Allocator.Error!Action {
-        _ = index;
-        const name = ctx.tree.string(id.name);
-        try self.visited.append(self.gpa, name[0]);
+        try self.visited.append(self.gpa, ctx.tree.string(id.name)[0]);
         if (!self.grown) {
             self.grown = true;
-            var i: usize = 0;
-            while (i < 512) : (i += 1) {
-                const node = try ctx.tree.addNode(
-                    .{ .null_literal = .{} },
-                    .{ .start = 0, .end = 0 },
-                );
+            const span: ast.Span = .{ .start = 0, .end = 0 };
+            for (0..512) |_| {
+                const node = try ctx.tree.addNode(.{ .null_literal = .{} }, span);
                 _ = try ctx.tree.addExtra(&.{node});
             }
         }

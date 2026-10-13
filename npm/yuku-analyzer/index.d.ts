@@ -1,6 +1,5 @@
 import type {
   Comment,
-  Core,
   Diagnostic,
   FileOptions,
   Identifier,
@@ -25,14 +24,14 @@ interface ParseOptions {
 
 interface SetFileOptions extends Omit<FileOptions, "path">, ParseOptions {}
 
-interface AnalyzeOptions extends FileOptions, ParseOptions, Pick<AnalyzerOptions, "core"> {}
+interface AnalyzeOptions extends FileOptions, ParseOptions, Pick<AnalyzerOptions, "wasm"> {}
 
 interface AnalyzerOptions {
   /**
-   * The core that analyzes, from `load` in `yuku-core` or `@yuku-core/wasm`.
-   * @default the native core
+   * The build of Yuku that analyzes, one with a dialect compiled in.
+   * @default the module yuku-parser ships
    */
-  core?: Core;
+  wasm?: WebAssembly.Module;
   /**
    * Maps an import specifier to the path of a file in the project. Return `false` for a module
    * outside the project, such as a package, and `null` when it cannot be resolved, which is
@@ -383,6 +382,8 @@ type AsyncSemanticVisitors = {
 
 /** Analyzes one file. */
 declare function analyze(source: string, options?: AnalyzeOptions): Module;
+
+export { ready } from "yuku-parser";
 
 export {
   analyze,

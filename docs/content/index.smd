@@ -15,7 +15,9 @@ Yuku is a high-performance JavaScript and TypeScript compiler toolchain written 
 
 **Fast.** Data-oriented from the ground up, with rigorous performance engineering.
 
-**Small.** A fraction of the install size of the alternatives, with one [core](#javascript) shared by every package, see [Size](#size).
+**Small.** A fraction of the install size of the alternatives, see [Size](#size).
+
+**Anywhere.** One WebAssembly build runs in Node.js, Bun, Deno, browsers, and edge runtimes, see [JavaScript](#javascript).
 
 **Zero dependencies.** Pure Zig, easy to build, embed, and cross-compile.
 
@@ -38,35 +40,16 @@ Yuku is a high-performance JavaScript and TypeScript compiler toolchain written 
 
 Each package documents its API in its README.
 
-The core, Yuku's compiled code, is shared by every package, so it downloads once however many you install. `yuku-parser` and `yuku-analyzer` together install 907 kB, against 1.58 MB with a binary each. Toolchains with a binary per tool repeat the parser in every one, so the gap widens with each tool Yuku adds. Future tools, such as the transformer, use the core's parser instead of their own.
+The parser and analyzer run one WebAssembly build of Yuku, which comes with `yuku-parser`, so it downloads once however many tools you install. Toolchains with a native binary per tool repeat the parser in every one, so the gap widens with each tool Yuku adds.
 
-># [WebAssembly]($block.collapsible(false))
->The core comes in two builds with the same API and byte-identical results. The native core is the fastest and the default, installed for your platform with no setup.
->
->The WebAssembly core runs anywhere: browsers, edge runtimes, and platforms without a native build. Install [`@yuku-core/wasm`](https://www.npmjs.com/package/@yuku-core/wasm), load it once, and pass it to every package that takes one.
->
->```js
->import { load } from "@yuku-core/wasm";
->import { parse } from "yuku-parser";
->
->const core = await load();
->
->parse("const x = 1;", { core });
->```
->
->To choose the native core explicitly, load it from `yuku-core` the same way.
->
->For runtimes that import `.wasm` files as compiled modules, such as Cloudflare Workers, use `loadSync`.
->
->```js
->import { loadSync } from "@yuku-core/wasm";
->import wasm from "@yuku-core/wasm/yuku-core.wasm";
->import { parse } from "yuku-parser";
->
->const core = loadSync(wasm);
->
->parse("const x = 1;", { core });
->```
+The packages run as they are in Node.js, Bun, Deno, browsers, and edge runtimes such as Cloudflare Workers. A browser compiles the WebAssembly after import, so it awaits `ready` once before the first parse.
+
+```js
+import { parse, ready } from "yuku-parser";
+
+await ready;
+parse("const x = 1;");
+```
 
 ### [Zig]($section.id('zig'))
 
@@ -102,7 +85,7 @@ The lead holds on large files.
 
 ### [Analyzer]($section.id('analyzer-performance'))
 
-Analyzing a whole codebase, with every reference resolved and every import linked across files, Yuku is 5–11× faster than typescript-eslint, and 4–7× faster than TypeScript through its API.
+Analyzing a whole codebase, with every reference resolved and every import linked across files, Yuku is 6–11× faster than typescript-eslint, and 3–6× faster than TypeScript through its API.
 
 ![Analyzing three.js (755 files) on npm · [benchmark](https://github.com/yuku-toolchain/ecmascript-analyzer-benchmark-js)](https://raw.githubusercontent.com/yuku-toolchain/ecmascript-analyzer-benchmark-js/refs/heads/main/charts/three.png "npm benchmark comparing Yuku, TypeScript, and typescript-eslint analyzing three.js")
 
@@ -116,6 +99,6 @@ Installed with npm, dependencies included:
 
 | To                            | Yuku                       | Others                                                                                      |
 | ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
-| Parse                         | `yuku-parser` **730 kB**   | `oxc-parser` 4.7 MB, `@babel/parser` 4.8 MB, `@typescript-eslint/typescript-estree` 26.3 MB |
-| Analyze scopes and references | `yuku-analyzer` **860 kB** | `@typescript-eslint/typescript-estree` + `@typescript-eslint/scope-manager` 26.7 MB         |
-| Print an AST                  | `yuku-codegen` **200 kB**  | `astring` 270 kB, `@babel/generator` 2.5 MB                                                 |
+| Parse                         | `yuku-parser` **830 kB**   | `oxc-parser` 4.7 MB, `@babel/parser` 4.8 MB, `@typescript-eslint/typescript-estree` 26.3 MB |
+| Analyze scopes and references | `yuku-analyzer` **1.0 MB** | `@typescript-eslint/typescript-estree` + `@typescript-eslint/scope-manager` 26.7 MB         |
+| Print an AST                  | `yuku-codegen` **210 kB**  | `astring` 270 kB, `@babel/generator` 2.5 MB                                                 |

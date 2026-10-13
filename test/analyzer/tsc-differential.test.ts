@@ -1,11 +1,11 @@
-// Compares every reference's binding with the one the TypeScript checker resolves.
+// every reference's binding against the one the TypeScript checker resolves
 
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import { analyze } from "yuku-analyzer";
 import type { SourceLang, SourceType } from "yuku-parser";
-import { corpusFiles, projectFiles, type CorpusFile } from "../corpus";
-import { differential, type Comparison, type Known } from "./utils/differential";
+import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
+import { differential, singleFileProgram, type Comparison, type Known } from "./utils/differential";
 
 const FILE_NAMES: Record<SourceLang, string> = {
   js: "input.js",
@@ -26,46 +26,15 @@ const SCRIPT_KINDS: Record<SourceLang, ts.ScriptKind> = {
 interface Checker {
   /** Declaration starts, or null to skip. */
   resolve(position: number): number[] | null;
-  /** Whether tsc reports an error naming `name` at a position. */
   rejects(name: string, positions: number[]): boolean;
   resolvedUses(): [position: number, name: string][];
 }
 
-const { getSetExternalModuleIndicator } = ts as unknown as {
-  getSetExternalModuleIndicator(options: ts.CompilerOptions): (file: ts.SourceFile) => void;
-};
-
 function checker(source: string, lang: SourceLang, sourceType: SourceType): Checker {
-  const fileName = FILE_NAMES[lang];
-  const options: ts.CompilerOptions = {
-    noLib: true,
-    noResolve: true,
-    allowJs: true,
-    moduleDetection:
-      sourceType === "module" ? ts.ModuleDetectionKind.Force : ts.ModuleDetectionKind.Legacy,
-  };
-  const file = ts.createSourceFile(
-    fileName,
-    source,
-    {
-      languageVersion: ts.ScriptTarget.ESNext,
-      setExternalModuleIndicator: getSetExternalModuleIndicator(options),
-    },
-    true,
-    SCRIPT_KINDS[lang],
+  const { program, file, rejects } = singleFileProgram(
+    { name: FILE_NAMES[lang], source, kind: SCRIPT_KINDS[lang], sourceType },
+    { allowJs: true },
   );
-  const host: ts.CompilerHost = {
-    getSourceFile: (name) => (name === fileName ? file : undefined),
-    getDefaultLibFileName: () => "lib.d.ts",
-    writeFile: () => {},
-    getCurrentDirectory: () => "",
-    getCanonicalFileName: (name) => name,
-    useCaseSensitiveFileNames: () => true,
-    getNewLine: () => "\n",
-    fileExists: (name) => name === fileName,
-    readFile: () => undefined,
-  };
-  const program = ts.createProgram([fileName], options, host);
   const typeChecker = program.getTypeChecker();
 
   const identifiers = new Map<number, ts.Identifier>();
@@ -73,8 +42,6 @@ function checker(source: string, lang: SourceLang, sourceType: SourceType): Chec
     if (ts.isIdentifier(node)) identifiers.set(node.getStart(file), node);
     ts.forEachChild(node, visit);
   })(file);
-
-  let errors: ts.Diagnostic[] | null = null;
 
   return {
     resolve(position) {
@@ -88,18 +55,7 @@ function checker(source: string, lang: SourceLang, sourceType: SourceType): Chec
       }
       return starts;
     },
-    rejects(name, positions) {
-      errors ??= [
-        ...program.getSyntacticDiagnostics(file),
-        ...program.getSemanticDiagnostics(file),
-      ];
-      const quoted = `'${name}'`;
-      return errors.some(({ start, length, messageText }) => {
-        if (start === undefined || length === undefined) return false;
-        if (!ts.flattenDiagnosticMessageText(messageText, "\n").includes(quoted)) return false;
-        return positions.some((position) => position >= start && position < start + length);
-      });
-    },
+    rejects,
     resolvedUses() {
       const uses: [position: number, name: string][] = [];
       for (const [position, node] of identifiers) {
@@ -415,5 +371,5 @@ describe("resolution agrees with tsc", () => {
     });
   }
 
-  differential("corpus and projects", [...corpusFiles(), ...projectFiles()], compareFile, KNOWN);
+  differential("corpus and projects", corpusAndProjectFiles(), compareFile, KNOWN);
 });

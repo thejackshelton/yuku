@@ -9,6 +9,21 @@ interface PreviewMetadata {
   packages: PreviewPackage[];
 }
 
+interface Deployment {
+  environment: string;
+  statuses_url: string;
+}
+
+interface DeploymentStatus {
+  state: string;
+  environment_url?: string;
+}
+
+interface IssueComment {
+  id: number;
+  body: string;
+}
+
 const MARKER = "<!-- preview-packages -->";
 
 const { GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, METADATA_PATH, HEAD_SHA } = process.env;
@@ -18,8 +33,7 @@ if (!PR_NUMBER) {
   process.exit(0);
 }
 
-const metadata = JSON.parse(readFileSync(METADATA_PATH!, "utf8")) as PreviewMetadata;
-const packages = metadata.packages.filter((pkg) => !pkg.name.includes("/binding-"));
+const { packages } = JSON.parse(readFileSync(METADATA_PATH!, "utf8")) as PreviewMetadata;
 
 if (packages.length === 0) {
   console.error(`no publishable packages in ${METADATA_PATH}`);
@@ -36,14 +50,13 @@ const headers = {
 async function previewPlayground(): Promise<string | null> {
   if (!HEAD_SHA) return null;
   for (let attempt = 0; attempt < 6; attempt++) {
-    const res = await fetch(`${api}/deployments?sha=${HEAD_SHA}`, { headers });
-    if (res.ok) {
-      const deployments = (await res.json()) as { environment: string; statuses_url: string }[];
-      for (const deployment of deployments) {
+    const response = await fetch(`${api}/deployments?sha=${HEAD_SHA}`, { headers });
+    if (response.ok) {
+      for (const deployment of (await response.json()) as Deployment[]) {
         if (!deployment.environment.startsWith("Preview")) continue;
         const statuses = await fetch(deployment.statuses_url, { headers });
         if (!statuses.ok) continue;
-        const done = ((await statuses.json()) as { state: string; environment_url?: string }[]).find(
+        const done = ((await statuses.json()) as DeploymentStatus[]).find(
           (status) => status.state === "success" && status.environment_url,
         );
         if (done) return done.environment_url!;
@@ -54,8 +67,7 @@ async function previewPlayground(): Promise<string | null> {
   return null;
 }
 
-const parser = packages.find((pkg) => pkg.name === "yuku-parser");
-const sha = parser?.url.split("@").pop();
+const sha = packages.find((entry) => entry.name === "yuku-parser")?.url.split("@").pop();
 const origin = (await previewPlayground()) ?? "https://playground.yuku.fyi";
 const playground = sha ? `${origin}/?pr=${sha}` : null;
 
@@ -63,14 +75,12 @@ const body = [
   MARKER,
   "### Preview packages",
   "",
-  ...(playground
-    ? [`Try this PR in the [playground](${playground}).`, ""]
-    : []),
+  ...(playground ? [`Try this PR in the [playground](${playground}).`, ""] : []),
   "| Package | Install |",
   "| --- | --- |",
   ...packages
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((pkg) => `| \`${pkg.name}\` | \`npm i ${pkg.url}\` |`),
+    .map((entry) => `| \`${entry.name}\` | \`npm i ${entry.url}\` |`),
 ].join("\n");
 
 const listed = await fetch(`${api}/issues/${PR_NUMBER}/comments?per_page=100`, { headers });
@@ -79,20 +89,19 @@ if (!listed.ok) {
   process.exit(1);
 }
 
-const existing = ((await listed.json()) as { id: number; body: string }[]).find((comment) =>
+const existing = ((await listed.json()) as IssueComment[]).find((comment) =>
   comment.body.startsWith(MARKER),
 );
 
-const target = existing ? `${api}/issues/comments/${existing.id}` : `${api}/issues/${PR_NUMBER}/comments`;
-const posted = await fetch(target, {
-  method: existing ? "PATCH" : "POST",
-  headers,
-  body: JSON.stringify({ body }),
-});
+const posted = await fetch(
+  existing ? `${api}/issues/comments/${existing.id}` : `${api}/issues/${PR_NUMBER}/comments`,
+  { method: existing ? "PATCH" : "POST", headers, body: JSON.stringify({ body }) },
+);
 
 if (!posted.ok) {
   console.error(`cannot post comment (${posted.status}): ${await posted.text()}`);
   process.exit(1);
 }
 
-console.log(`${existing ? "updated" : "created"} the preview comment with ${packages.length} packages`);
+const action = existing ? "updated" : "created";
+console.log(`${action} the preview comment with ${packages.length} packages`);

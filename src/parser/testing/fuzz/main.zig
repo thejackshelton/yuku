@@ -77,10 +77,8 @@ pub fn main() void {
     var iter: u64 = 0;
     while (iter < iterations) : (iter += 1) {
         current_iter = iter;
-        const input = mutator.produce(&buf, gpa) catch {
-            // oom in the mutator itself is not a finding
-            continue;
-        };
+        // oom in the mutator itself is not a finding
+        const input = mutator.produce(&buf, gpa) catch continue;
         const mode = core.modes[mutator.rng.uintLessThan(usize, core.modes.len)];
         current_input = input;
         current_mode = mode;

@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { load } from "@yuku-core/wasm";
 import { parse, type ParseOptions } from "yuku-parser";
 
 const script: ParseOptions = { sourceType: "script" };
@@ -56,16 +55,14 @@ describe("diagnostics", () => {
 });
 
 describe("depth", () => {
-  test("a chain of any depth decodes on both cores", async () => {
+  test("a chain of any depth decodes", () => {
     const source = "a" + ".b(/* c */ x)".repeat(1000);
-    for (const core of [undefined, await load()]) {
-      for (const attachComments of [false, true]) {
-        let node: any = (parse(source, { core, attachComments }).program.body[0] as any).expression;
-        let calls = 0;
-        for (; node.type === "CallExpression"; node = node.callee.object) calls++;
-        expect(calls).toBe(1000);
-        expect(node.name).toBe("a");
-      }
+    for (const attachComments of [false, true]) {
+      let node: any = (parse(source, { attachComments }).program.body[0] as any).expression;
+      let calls = 0;
+      for (; node.type === "CallExpression"; node = node.callee.object) calls++;
+      expect(calls).toBe(1000);
+      expect(node.name).toBe("a");
     }
   });
 });

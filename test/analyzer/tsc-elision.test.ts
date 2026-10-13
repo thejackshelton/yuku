@@ -1,57 +1,36 @@
-// Compares the imports Yuku's type positions keep with the ones tsc keeps per file.
+// the imports Yuku's type positions keep against the ones tsc keeps per file
 
 import { describe, expect, test } from "bun:test";
 import ts from "typescript";
 import { analyze, BindingFlags, type Binding, type Module } from "yuku-analyzer";
 import type { Node, SourceLang, SourceType, TSImportEqualsDeclaration } from "yuku-parser";
-import { corpusFiles, projectFiles, type CorpusFile } from "../corpus";
-import { differential, type Comparison, type Known } from "./utils/differential";
+import { corpusAndProjectFiles, type CorpusFile } from "../corpus";
+import { differential, singleFileProgram, type Comparison, type Known } from "./utils/differential";
 
 interface Emitted {
   kept: Set<string>;
   rejects(name: string, positions: number[]): boolean;
 }
 
-const { getSetExternalModuleIndicator } = ts as unknown as {
-  getSetExternalModuleIndicator(options: ts.CompilerOptions): (file: ts.SourceFile) => void;
-};
-
 function emit(source: string, lang: SourceLang, sourceType: SourceType): Emitted {
-  const fileName = lang === "tsx" ? "input.tsx" : "input.ts";
-  const options: ts.CompilerOptions = {
-    noLib: true,
-    noResolve: true,
-    module: ts.ModuleKind.Preserve,
-    target: ts.ScriptTarget.ESNext,
-    jsx: ts.JsxEmit.Preserve,
-    // parameter decorators exist only under the legacy flag
-    experimentalDecorators: true,
-    moduleDetection:
-      sourceType === "module" ? ts.ModuleDetectionKind.Force : ts.ModuleDetectionKind.Legacy,
-  };
-  const file = ts.createSourceFile(
-    fileName,
-    source,
-    {
-      languageVersion: ts.ScriptTarget.ESNext,
-      setExternalModuleIndicator: getSetExternalModuleIndicator(options),
-    },
-    true,
-    lang === "tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
+  const tsx = lang === "tsx";
   let output = "";
-  const host: ts.CompilerHost = {
-    getSourceFile: (name) => (name === fileName ? file : undefined),
-    getDefaultLibFileName: () => "lib.d.ts",
-    writeFile: (_, text) => (output = text),
-    getCurrentDirectory: () => "",
-    getCanonicalFileName: (name) => name,
-    useCaseSensitiveFileNames: () => true,
-    getNewLine: () => "\n",
-    fileExists: (name) => name === fileName,
-    readFile: () => undefined,
-  };
-  const program = ts.createProgram([fileName], options, host);
+  const { program, file, rejects } = singleFileProgram(
+    {
+      name: tsx ? "input.tsx" : "input.ts",
+      source,
+      kind: tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      sourceType,
+    },
+    {
+      module: ts.ModuleKind.Preserve,
+      target: ts.ScriptTarget.ESNext,
+      jsx: ts.JsxEmit.Preserve,
+      // parameter decorators exist only under the legacy flag
+      experimentalDecorators: true,
+    },
+    (_, text) => (output = text),
+  );
   program.emit(file);
 
   const js = ts.createSourceFile("output.jsx", output, ts.ScriptTarget.ESNext, false);
@@ -74,22 +53,7 @@ function emit(source: string, lang: SourceLang, sourceType: SourceType): Emitted
     }
   }
 
-  let errors: readonly ts.Diagnostic[] | null = null;
-  return {
-    kept,
-    rejects(name, positions) {
-      errors ??= [
-        ...program.getSyntacticDiagnostics(file),
-        ...program.getSemanticDiagnostics(file),
-      ];
-      const quoted = `'${name}'`;
-      return errors.some(({ start, length, messageText }) => {
-        if (start === undefined || length === undefined) return false;
-        if (!ts.flattenDiagnosticMessageText(messageText, "\n").includes(quoted)) return false;
-        return positions.some((position) => position >= start && position < start + length);
-      });
-    },
-  };
+  return { kept, rejects };
 }
 
 function isRequire(node: ts.Expression | undefined): boolean {
@@ -259,8 +223,6 @@ describe("type positions agree with the imports tsc elides", () => {
     expect(result.mismatches).toEqual(["A: yuku drops, tsc keeps"]);
   });
 
-  const files = [...corpusFiles(), ...projectFiles()].filter(
-    (file) => file.lang === "ts" || file.lang === "tsx",
-  );
+  const files = corpusAndProjectFiles().filter((file) => file.lang === "ts" || file.lang === "tsx");
   differential("corpus and projects", files, compareFile, KNOWN);
 });

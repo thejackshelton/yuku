@@ -11,9 +11,19 @@ import type {
   TSType,
 } from "@yuku-toolchain/types";
 
-// every group member must be a real node type, and the union-backed
-// groups must match their @yuku-toolchain/types union exactly, both
-// directions checked below
+const DECLARATION = [
+  "FunctionDeclaration",
+  "ClassDeclaration",
+  "VariableDeclaration",
+  "TSDeclareFunction",
+  "TSTypeAliasDeclaration",
+  "TSInterfaceDeclaration",
+  "TSEnumDeclaration",
+  "TSModuleDeclaration",
+  "TSImportEqualsDeclaration",
+] as const;
+
+// groups backed by a @yuku-toolchain/types union must match it exactly, checked below
 export const ALIAS_GROUPS = {
   Expression: [
     "Identifier",
@@ -70,27 +80,9 @@ export const ALIAS_GROUPS = {
     "ForInStatement",
     "ForOfStatement",
     "WithStatement",
-    "FunctionDeclaration",
-    "ClassDeclaration",
-    "VariableDeclaration",
-    "TSDeclareFunction",
-    "TSTypeAliasDeclaration",
-    "TSInterfaceDeclaration",
-    "TSEnumDeclaration",
-    "TSModuleDeclaration",
-    "TSImportEqualsDeclaration",
+    ...DECLARATION,
   ],
-  Declaration: [
-    "FunctionDeclaration",
-    "ClassDeclaration",
-    "VariableDeclaration",
-    "TSDeclareFunction",
-    "TSTypeAliasDeclaration",
-    "TSInterfaceDeclaration",
-    "TSEnumDeclaration",
-    "TSModuleDeclaration",
-    "TSImportEqualsDeclaration",
-  ],
+  Declaration: DECLARATION,
   ModuleDeclaration: [
     "ImportDeclaration",
     "ExportNamedDeclaration",

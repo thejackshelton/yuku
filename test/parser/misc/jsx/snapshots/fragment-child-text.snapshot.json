@@ -1,0 +1,143 @@
+{
+  "program": {
+    "type": "Program",
+    "start": 0,
+    "end": 70,
+    "sourceType": "script",
+    "hashbang": null,
+    "body": [
+      {
+        "type": "ExpressionStatement",
+        "start": 0,
+        "end": 48,
+        "expression": {
+          "type": "JSXElement",
+          "start": 0,
+          "end": 47,
+          "openingElement": {
+            "type": "JSXOpeningElement",
+            "start": 0,
+            "end": 5,
+            "name": {
+              "type": "JSXIdentifier",
+              "start": 1,
+              "end": 4,
+              "name": "div"
+            },
+            "attributes": [],
+            "selfClosing": false
+          },
+          "children": [
+            {
+              "type": "JSXFragment",
+              "start": 5,
+              "end": 10,
+              "openingFragment": {
+                "type": "JSXOpeningFragment",
+                "start": 5,
+                "end": 7
+              },
+              "children": [],
+              "closingFragment": {
+                "type": "JSXClosingFragment",
+                "start": 7,
+                "end": 10
+              }
+            },
+            {
+              "type": "JSXText",
+              "start": 10,
+              "end": 41,
+              "value": "'a quote after a child fragment",
+              "raw": "'a quote after a child fragment"
+            }
+          ],
+          "closingElement": {
+            "type": "JSXClosingElement",
+            "start": 41,
+            "end": 47,
+            "name": {
+              "type": "JSXIdentifier",
+              "start": 43,
+              "end": 46,
+              "name": "div"
+            }
+          }
+        }
+      },
+      {
+        "type": "ExpressionStatement",
+        "start": 49,
+        "end": 69,
+        "expression": {
+          "type": "JSXElement",
+          "start": 49,
+          "end": 68,
+          "openingElement": {
+            "type": "JSXOpeningElement",
+            "start": 49,
+            "end": 68,
+            "name": {
+              "type": "JSXIdentifier",
+              "start": 50,
+              "end": 51,
+              "name": "a"
+            },
+            "attributes": [
+              {
+                "type": "JSXAttribute",
+                "start": 52,
+                "end": 59,
+                "name": {
+                  "type": "JSXIdentifier",
+                  "start": 52,
+                  "end": 53,
+                  "name": "b"
+                },
+                "value": {
+                  "type": "JSXFragment",
+                  "start": 54,
+                  "end": 59,
+                  "openingFragment": {
+                    "type": "JSXOpeningFragment",
+                    "start": 54,
+                    "end": 56
+                  },
+                  "children": [],
+                  "closingFragment": {
+                    "type": "JSXClosingFragment",
+                    "start": 56,
+                    "end": 59
+                  }
+                }
+              },
+              {
+                "type": "JSXAttribute",
+                "start": 60,
+                "end": 65,
+                "name": {
+                  "type": "JSXIdentifier",
+                  "start": 60,
+                  "end": 61,
+                  "name": "c"
+                },
+                "value": {
+                  "type": "Literal",
+                  "start": 62,
+                  "end": 65,
+                  "value": "d",
+                  "raw": "\"d\""
+                }
+              }
+            ],
+            "selfClosing": true
+          },
+          "children": [],
+          "closingElement": null
+        }
+      }
+    ]
+  },
+  "comments": [],
+  "diagnostics": []
+}

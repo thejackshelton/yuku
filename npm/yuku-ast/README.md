@@ -2,7 +2,7 @@
 
 Walk, build, and check any ESTree / TypeScript-ESTree AST, with typed visitors, in-place mutation, builders, guards, and syntactic utilities, part of [Yuku](https://yuku.fyi).
 
-It is plain JavaScript and works on any ESTree AST, whichever parser produced it.
+It is plain JavaScript and works whichever parser produced the AST.
 
 - [Install](#install)
 - [Walking](#walking)

@@ -33,78 +33,6 @@ export type Visitors<S = unknown> = {
   leave?: WalkHandler<Node, S>;
 };
 
-interface Handlers {
-  enter: WalkHandler[];
-  leave: WalkHandler[];
-}
-
-interface Dispatch {
-  enter: WalkHandler | null;
-  leave: WalkHandler | null;
-  typed: (type: string) => Handlers | undefined;
-}
-
-function createDispatch(visitors: Visitors<never> | AsyncVisitors<never>): Dispatch {
-  let enter: WalkHandler | null = null;
-  let leave: WalkHandler | null = null;
-  const concrete = new Map<string, Handlers>();
-
-  // enters accumulate in registration order, leaves mirror in reverse,
-  // so aliases enter before the typed handler and leave after it
-  const add = (type: string, handler: unknown): void => {
-    const hooks =
-      typeof handler === "function"
-        ? ({ enter: handler } as WalkHooks)
-        : (handler as WalkHooks);
-    let entry = concrete.get(type);
-    if (entry === undefined) {
-      entry = { enter: [], leave: [] };
-      concrete.set(type, entry);
-    }
-    if (hooks.enter) entry.enter.push(hooks.enter);
-    if (hooks.leave) entry.leave.unshift(hooks.leave);
-  };
-
-  for (const [name, value] of Object.entries(visitors)) {
-    if (value == null) continue;
-    if (name === "enter") enter = value as WalkHandler;
-    else if (name === "leave") leave = value as WalkHandler;
-    else if (name in ALIAS_GROUPS) {
-      for (const type of ALIAS_GROUPS[name as AliasName]) add(type, value);
-    }
-  }
-  for (const [name, value] of Object.entries(visitors)) {
-    if (value == null || name === "enter" || name === "leave" || name in ALIAS_GROUPS) continue;
-    add(name, value);
-  }
-
-  return { enter, leave, typed: (type) => concrete.get(type) };
-}
-
-/**
- * Walk an AST depth-first, dispatching to typed visitors and mutating
- * in place. Traversal order is driven by tables generated from the
- * parser's AST definition, so it can never drift. Returns the root.
- */
-export function walk<T extends Node, S = unknown>(root: T, visitors: Visitors<S>, state?: S): T {
-  _walk(root, visitors, state, new WalkContext());
-  return root;
-}
-
-/**
- * The async counterpart of {@link walk}: identical traversal order and
- * mutation semantics, with every handler awaited before the walk moves
- * on. Resolves to the root.
- */
-export async function walkAsync<T extends Node, S = unknown>(
-  root: T,
-  visitors: AsyncVisitors<S>,
-  state?: S,
-): Promise<T> {
-  await _walkAsync(root, visitors, state, new WalkContext());
-  return root;
-}
-
 /** An async visitor function for one node type or alias. */
 export type AsyncWalkHandler<T extends Node = Node, S = unknown> = (
   node: T,
@@ -127,8 +55,74 @@ export type AsyncVisitors<S = unknown> = {
   leave?: AsyncWalkHandler<Node, S>;
 };
 
-// nodes are open records to the table-driven engine, children are
-// reached by generated key and are nodes, node arrays, or holes
+interface Handlers {
+  enter: WalkHandler[];
+  leave: WalkHandler[];
+}
+
+interface Dispatch {
+  enter: WalkHandler | null;
+  leave: WalkHandler | null;
+  typed: Map<string, Handlers>;
+}
+
+function createDispatch(visitors: Visitors<never> | AsyncVisitors<never>): Dispatch {
+  let enter: WalkHandler | null = null;
+  let leave: WalkHandler | null = null;
+  const typed = new Map<string, Handlers>();
+
+  // leaves run in reverse registration order, so aliases enter before the
+  // typed handler and leave after it
+  const add = (type: string, handler: unknown): void => {
+    const hooks = (typeof handler === "function" ? { enter: handler } : handler) as WalkHooks;
+    let entry = typed.get(type);
+    if (entry === undefined) {
+      entry = { enter: [], leave: [] };
+      typed.set(type, entry);
+    }
+    if (hooks.enter) entry.enter.push(hooks.enter);
+    if (hooks.leave) entry.leave.unshift(hooks.leave);
+  };
+
+  for (const [name, value] of Object.entries(visitors)) {
+    if (value == null) continue;
+    if (name === "enter") enter = value as WalkHandler;
+    else if (name === "leave") leave = value as WalkHandler;
+    else if (name in ALIAS_GROUPS) {
+      for (const type of ALIAS_GROUPS[name as AliasName]) add(type, value);
+    }
+  }
+  for (const [name, value] of Object.entries(visitors)) {
+    if (value == null || name === "enter" || name === "leave" || name in ALIAS_GROUPS) continue;
+    add(name, value);
+  }
+
+  return { enter, leave, typed };
+}
+
+/**
+ * Walk an AST depth-first, dispatching to typed visitors and mutating
+ * in place. Returns the root.
+ */
+export function walk<T extends Node, S = unknown>(root: T, visitors: Visitors<S>, state?: S): T {
+  _walk(root, visitors, state, new WalkContext());
+  return root;
+}
+
+/**
+ * The async counterpart of {@link walk}, with every handler awaited
+ * before the walk moves on. Resolves to the root.
+ */
+export async function walkAsync<T extends Node, S = unknown>(
+  root: T,
+  visitors: AsyncVisitors<S>,
+  state?: S,
+): Promise<T> {
+  await _walkAsync(root, visitors, state, new WalkContext());
+  return root;
+}
+
+// children are read by generated key
 type AnyNode = Node & Record<string, unknown>;
 
 function position(
@@ -180,7 +174,7 @@ export function _walk(
   state: unknown,
   ctx: WalkContext,
 ): void {
-  const d = createDispatch(visitors);
+  const dispatch = createDispatch(visitors);
   ctx.state = state;
   const ancestors = ctx._ancestors;
 
@@ -190,12 +184,12 @@ export function _walk(
     list: Node[] | null,
     frame: Frame | null,
   ): boolean {
-    let typed = d.typed(node.type);
+    let typed = dispatch.typed.get(node.type);
     const parent = ctx.parent;
 
     position(ctx, node, key, list, frame);
-    if (d.enter !== null) {
-      d.enter(node, ctx);
+    if (dispatch.enter !== null) {
+      dispatch.enter(node, ctx);
       if (ctx._stopped) return false;
     }
     if (typed !== undefined) {
@@ -210,7 +204,7 @@ export function _walk(
     }
     if (ctx._replacement !== null) {
       node = applyReplace(ctx, parent, key, list, frame);
-      typed = d.typed(node.type);
+      typed = dispatch.typed.get(node.type);
     }
 
     const skipped = ctx._skip;
@@ -220,17 +214,17 @@ export function _walk(
       if (keys !== undefined && keys.length > 0) {
         ancestors.push(node);
         for (let k = 0; k < keys.length; k++) {
-          const key2 = keys[k]!;
-          const value = (node as AnyNode)[key2];
-          if (value === null || value === undefined || typeof value !== "object") continue;
+          const field = keys[k]!;
+          const value = (node as AnyNode)[field];
+          if (value === null || typeof value !== "object") continue;
           if (Array.isArray(value)) {
             const childFrame = { i: 0 };
             for (; childFrame.i < value.length; childFrame.i++) {
               const item = value[childFrame.i] as Node | null;
               // pattern element holes are null
-              if (item !== null && !visit(item, key2, value as Node[], childFrame)) return false;
+              if (item !== null && !visit(item, field, value as Node[], childFrame)) return false;
             }
-          } else if (!visit(value as Node, key2, null, null)) {
+          } else if (!visit(value as Node, field, null, null)) {
             return false;
           }
         }
@@ -245,8 +239,8 @@ export function _walk(
         if (ctx._stopped) return false;
       }
     }
-    if (d.leave !== null) {
-      d.leave(node, ctx);
+    if (dispatch.leave !== null) {
+      dispatch.leave(node, ctx);
       if (ctx._stopped) return false;
     }
     if (ctx._removed) applyRemove(ctx, parent, key, list, frame);
@@ -256,15 +250,14 @@ export function _walk(
   })(root, null, null, null);
 }
 
-// line-for-line twin of _walk with each handler awaited before the walk
-// moves on, so keep the two visit bodies in lockstep
+// twin of _walk with every handler awaited, keep the two in lockstep
 export async function _walkAsync(
   root: Node,
   visitors: AsyncVisitors<never>,
   state: unknown,
   ctx: WalkContext,
 ): Promise<void> {
-  const d = createDispatch(visitors);
+  const dispatch = createDispatch(visitors);
   ctx.state = state;
   const ancestors = ctx._ancestors;
 
@@ -274,12 +267,12 @@ export async function _walkAsync(
     list: Node[] | null,
     frame: Frame | null,
   ): Promise<boolean> {
-    let typed = d.typed(node.type);
+    let typed = dispatch.typed.get(node.type);
     const parent = ctx.parent;
 
     position(ctx, node, key, list, frame);
-    if (d.enter !== null) {
-      await d.enter(node, ctx);
+    if (dispatch.enter !== null) {
+      await dispatch.enter(node, ctx);
       if (ctx._stopped) return false;
     }
     if (typed !== undefined) {
@@ -294,7 +287,7 @@ export async function _walkAsync(
     }
     if (ctx._replacement !== null) {
       node = applyReplace(ctx, parent, key, list, frame);
-      typed = d.typed(node.type);
+      typed = dispatch.typed.get(node.type);
     }
 
     const skipped = ctx._skip;
@@ -304,19 +297,19 @@ export async function _walkAsync(
       if (keys !== undefined && keys.length > 0) {
         ancestors.push(node);
         for (let k = 0; k < keys.length; k++) {
-          const key2 = keys[k]!;
-          const value = (node as AnyNode)[key2];
-          if (value === null || value === undefined || typeof value !== "object") continue;
+          const field = keys[k]!;
+          const value = (node as AnyNode)[field];
+          if (value === null || typeof value !== "object") continue;
           if (Array.isArray(value)) {
             const childFrame = { i: 0 };
             for (; childFrame.i < value.length; childFrame.i++) {
               const item = value[childFrame.i] as Node | null;
               // pattern element holes are null
-              if (item !== null && !(await visit(item, key2, value as Node[], childFrame))) {
+              if (item !== null && !(await visit(item, field, value as Node[], childFrame))) {
                 return false;
               }
             }
-          } else if (!(await visit(value as Node, key2, null, null))) {
+          } else if (!(await visit(value as Node, field, null, null))) {
             return false;
           }
         }
@@ -331,8 +324,8 @@ export async function _walkAsync(
         if (ctx._stopped) return false;
       }
     }
-    if (d.leave !== null) {
-      await d.leave(node, ctx);
+    if (dispatch.leave !== null) {
+      await dispatch.leave(node, ctx);
       if (ctx._stopped) return false;
     }
     if (ctx._removed) applyRemove(ctx, parent, key, list, frame);

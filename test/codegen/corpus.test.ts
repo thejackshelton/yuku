@@ -5,22 +5,20 @@ import { parse, type ParseOptions, type SourceLang } from "yuku-parser";
 import { generate, type GenerateOptions } from "yuku-codegen";
 import { astDiffPath } from "../ast-helpers-for-test";
 import {
-  corpusFiles,
+  corpusAndProjectFiles,
   corpusPresent,
   forEachCorpusFile,
-  projectFiles,
   type CorpusFile,
 } from "../corpus";
 
 type Plan = "print" | "compact" | "strip" | "minify";
 
-const PLAN: { plan: Plan; options: GenerateOptions; outLang: (lang: SourceLang) => SourceLang }[] =
-  [
-    { plan: "print", options: { comments: true }, outLang: (l) => l },
-    { plan: "compact", options: { format: "compact", comments: true }, outLang: (l) => l },
-    { plan: "strip", options: { strip: true, comments: true }, outLang: stripLang },
-    { plan: "minify", options: { minify: true, comments: true }, outLang: (l) => l },
-  ];
+const PLANS: Record<Plan, GenerateOptions> = {
+  print: { comments: true },
+  compact: { format: "compact", comments: true },
+  strip: { strip: true, comments: true },
+  minify: { minify: true, comments: true },
+};
 
 const SAMPLE_MAX = 8;
 const failures: Record<Plan, string[]> = { print: [], compact: [], strip: [], minify: [] };
@@ -42,7 +40,8 @@ function checkFile(file: CorpusFile, source: string): void {
   if (ast.diagnostics.length > 0) return;
   checked++;
 
-  for (const { plan, options, outLang } of PLAN) {
+  const typed = file.lang !== "js" && file.lang !== "jsx";
+  for (const [plan, options] of Object.entries(PLANS) as [Plan, GenerateOptions][]) {
     let code: string;
     try {
       code = generate(ast.program, options).code;
@@ -51,14 +50,14 @@ function checkFile(file: CorpusFile, source: string): void {
       continue;
     }
 
-    const reparseOptions = { ...parseOptions, lang: outLang(file.lang) };
+    const lang = plan === "strip" ? stripLang(file.lang) : file.lang;
+    const reparseOptions = { ...parseOptions, lang };
     const reparsed = parse(code, reparseOptions);
     if (reparsed.diagnostics.length > 0) {
       note(plan, `${file.path}: reparse failed`);
       continue;
     }
 
-    const typed = file.lang !== "js" && file.lang !== "jsx";
     if (!(plan === "strip" && typed) && commentKey(ast) !== commentKey(reparsed)) {
       note(plan, `${file.path}: comment lost or duplicated`);
       continue;
@@ -113,7 +112,7 @@ function stripLang(lang: SourceLang): SourceLang {
 
 describe.skipIf(!corpusPresent())("codegen corpus invariants", () => {
   beforeAll(async () => {
-    await forEachCorpusFile(checkFile, [...corpusFiles(), ...projectFiles()]);
+    await forEachCorpusFile(corpusAndProjectFiles(), checkFile);
   }, 300_000);
 
   test("the corpus is non-empty", () => {

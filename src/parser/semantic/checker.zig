@@ -12,7 +12,6 @@ const Allocator = std.mem.Allocator;
 
 const semantic = traverser.semantic;
 const Symbol = semantic.Symbol;
-const Semantic = semantic.Semantic;
 
 const Action = traverser.Action;
 const SemanticCtx = semantic.Ctx;
@@ -29,6 +28,8 @@ pub const Checker = struct {
     // kinds of the module-level names a ts module declares without `export`
     local_kinds: std.StringHashMapUnmanaged(Symbol.Flags) = .empty,
     export_specifiers: std.ArrayList(ExportSpecifierInfo) = .empty,
+    // names of the plain functions declared in sloppy scopes
+    plain_functions: std.AutoHashMapUnmanaged(ast.NodeIndex, void) = .empty,
 
     // every export of one name, which ts judges once all are known
     const ExportedName = struct {
@@ -94,7 +95,7 @@ pub const Checker = struct {
         }
 
         const existing = binder.prior(&ctx.symbols, name, ctx.scope.scopes.items);
-        try self.checkRedeclaration(id, node_index, name, flags, ctx, existing);
+        try self.checkRedeclaration(node_index, name, flags, ctx, existing);
 
         switch (ctx.symbols.export_state) {
             .named => try self.recordExportedName(name, node_index, ctx, exportForm(flags, ctx)),
@@ -107,7 +108,6 @@ pub const Checker = struct {
 
     fn checkRedeclaration(
         self: *Self,
-        id: ast.BindingIdentifier,
         node_index: ast.NodeIndex,
         name: []const u8,
         flags: Symbol.Flags,
@@ -121,8 +121,9 @@ pub const Checker = struct {
         if (existing_id) |sym| {
             const existing = ctx.symbols.symbol(sym);
             const conflicts = binder.conflicts(ctx.symbols.pending, existing.flags);
-            if (conflicts and !isAnnexBDuplicate(ctx, node_index, sym)) {
-                try self.reportRedeclaration(id, node_index, sym, existing, ctx);
+            const first = ctx.symbols.firstDeclOf(sym);
+            if (conflicts and !self.isAnnexBDuplicate(node_index, first)) {
+                try self.reportRedeclaration(name, node_index, sym, ctx);
                 return;
             }
 
@@ -134,8 +135,7 @@ pub const Checker = struct {
                         params.kind == .unique_formal_parameters or
                         params.kind == .arrow_formal_parameters or
                         ecmascript.findNonSimpleParameter(ctx.tree, params) != null;
-                    if (must_be_unique)
-                        try self.reportRedeclaration(id, node_index, sym, existing, ctx);
+                    if (must_be_unique) try self.reportRedeclaration(name, node_index, sym, ctx);
                 }
             }
         }
@@ -155,9 +155,9 @@ pub const Checker = struct {
             };
             if (outer_holds_signature) {
                 if (ctx.symbols.ownBinding(outer, name)) |sym| {
-                    const existing = ctx.symbols.symbol(sym);
-                    if (binder.conflicts(ctx.symbols.pending, existing.flags))
-                        try self.reportRedeclaration(id, node_index, sym, existing, ctx);
+                    if (binder.conflicts(ctx.symbols.pending, ctx.symbols.symbol(sym).flags)) {
+                        try self.reportRedeclaration(name, node_index, sym, ctx);
+                    }
                 }
             }
         }
@@ -171,7 +171,7 @@ pub const Checker = struct {
                 if (ctx.symbols.ownBinding(scope_id, name)) |sym| {
                     const existing = ctx.symbols.symbol(sym);
                     if (existing.flags.isBlockScopedLike()) {
-                        try self.reportRedeclaration(id, node_index, sym, existing, ctx);
+                        try self.reportRedeclaration(name, node_index, sym, ctx);
                         break;
                     }
 
@@ -183,7 +183,7 @@ pub const Checker = struct {
                         const simple_param = param != .null and
                             ctx.tree.data(param) == .binding_identifier;
                         if (!simple_param) {
-                            try self.reportRedeclaration(id, node_index, sym, existing, ctx);
+                            try self.reportRedeclaration(name, node_index, sym, ctx);
                             break;
                         }
                     }
@@ -239,10 +239,11 @@ pub const Checker = struct {
         if (ctx.inTypePosition() or !ctx.scope.isStrict()) return .proceed;
 
         const span = ctx.tree.span(node_index);
-        if (util.Utf.hasOctalEscape(ctx.tree.source[span.start..span.end]))
+        if (util.Utf.hasOctalEscape(ctx.tree.source[span.start..span.end])) {
             try self.report(span, "Octal escape sequences are not allowed in strict mode", .{
                 .help = "Use \\xHH (hex) or \\uHHHH (unicode) escape instead",
             });
+        }
 
         return .proceed;
     }
@@ -279,8 +280,6 @@ pub const Checker = struct {
     }
 
     /// https://tc39.es/ecma262/#sec-function-definitions-static-semantics-early-errors
-    /// "It is a Syntax Error if FunctionBodyContainsUseStrict is true and
-    ///  IsSimpleParameterList of FormalParameters is false."
     pub fn enter_directive(
         self: *Self,
         directive: ast.Directive,
@@ -313,17 +312,21 @@ pub const Checker = struct {
         return .proceed;
     }
 
-    // labelled functions per 14.13.1 and B.3.1, IsLabelledFunction per 14.6.1,
-    // functions as if bodies per B.3.3
-    // https://tc39.es/ecma262/#sec-labelled-statements-static-semantics-early-errors (14.13.1)
-    // https://tc39.es/ecma262/#sec-if-statement-static-semantics-early-errors (14.6.1)
-    // https://tc39.es/ecma262/#sec-functiondeclarations-in-ifstatement-statement-clauses (B.3.3)
+    // where a function declaration may stand, labelled (14.13.1, B.3.1) or as an if body (B.3.3)
+    // https://tc39.es/ecma262/#sec-labelled-statements-static-semantics-early-errors
+    // https://tc39.es/ecma262/#sec-if-statement-static-semantics-early-errors
+    // https://tc39.es/ecma262/#sec-functiondeclarations-in-ifstatement-statement-clauses
     pub fn enter_function(
         self: *Self,
         func: ast.Function,
         node_index: ast.NodeIndex,
         ctx: *SemanticCtx,
     ) AnalysisError!Action {
+        if (func.id != .null and !func.async and !func.generator) {
+            if (!ctx.scope.get(ctx.symbols.pending.scope).flags.strict) {
+                try self.plain_functions.put(self.allocator, func.id, {});
+            }
+        }
         if (func.type != .function_declaration) return .proceed;
 
         const is_strict = ctx.scope.isStrict();
@@ -332,8 +335,8 @@ pub const Checker = struct {
         _ = iter.next(); // skip self
 
         const parent = while (iter.next()) |idx| {
-            const d = ctx.tree.data(idx);
-            if (d != .labeled_statement) break d;
+            const data = ctx.tree.data(idx);
+            if (data != .labeled_statement) break data;
             through_labels = true;
         } else return .proceed;
 
@@ -347,6 +350,7 @@ pub const Checker = struct {
             .export_named_declaration,
             .export_default_declaration,
             .ts_module_block,
+            .dialect,
             => !is_strict or !through_labels,
             .if_statement => !is_strict and !through_labels,
             else => false,
@@ -437,16 +441,11 @@ pub const Checker = struct {
         _: ast.NodeIndex,
         ctx: *SemanticCtx,
     ) AnalysisError!Action {
-        if (ctx.scope.isStrict())
-            try self.checkAssignTargetEvalArguments(expr.left, ctx);
+        if (ctx.scope.isStrict()) try self.checkAssignTargetEvalArguments(expr.left, ctx);
         return .proceed;
     }
 
-    /// 15.7.7 Static Semantics: AllPrivateIdentifiersValid
     /// https://tc39.es/ecma262/#sec-static-semantics-allprivateidentifiersvalid
-    ///
-    /// class C { #a; f() { #b in {} } }
-    ///                     ^^ undeclared
     pub fn enter_binary_expression(
         self: *Self,
         expr: ast.BinaryExpression,
@@ -746,8 +745,7 @@ pub const Checker = struct {
             );
         }
         try self.checkForInOfInitializer(ctx, stmt.left, false);
-        if (ctx.scope.isStrict())
-            try self.checkAssignTargetEvalArguments(stmt.left, ctx);
+        if (ctx.scope.isStrict()) try self.checkAssignTargetEvalArguments(stmt.left, ctx);
         return .proceed;
     }
 
@@ -759,8 +757,7 @@ pub const Checker = struct {
         ctx: *SemanticCtx,
     ) AnalysisError!Action {
         try self.checkForInOfInitializer(ctx, stmt.left, true);
-        if (ctx.scope.isStrict())
-            try self.checkAssignTargetEvalArguments(stmt.left, ctx);
+        if (ctx.scope.isStrict()) try self.checkAssignTargetEvalArguments(stmt.left, ctx);
         return .proceed;
     }
 
@@ -788,8 +785,7 @@ pub const Checker = struct {
         ctx: *SemanticCtx,
     ) AnalysisError!Action {
         if (stmt.label != .null) {
-            const label_id = ctx.tree.data(stmt.label).label_identifier;
-            const label_name = ctx.tree.string(label_id.name);
+            const label_name = labelName(ctx.tree, stmt.label);
             switch (findLabel(ctx, label_name)) {
                 .found => {},
                 .not_found => try self.report(
@@ -826,10 +822,23 @@ pub const Checker = struct {
         ctx: *SemanticCtx,
     ) AnalysisError!Action {
         if (stmt.label != .null) {
-            const label_id = ctx.tree.data(stmt.label).label_identifier;
-            const label_name = ctx.tree.string(label_id.name);
-            switch (findLabelForContinue(ctx, label_name)) {
-                .found => {},
+            const label_name = labelName(ctx.tree, stmt.label);
+            switch (findLabel(ctx, label_name)) {
+                .found => |body| {
+                    const target = ctx.tree.data(body);
+                    if (!target.isIteration() and target != .labeled_statement) {
+                        try self.report(
+                            ctx.tree.span(node_index),
+                            try self.fmt(
+                                "Label '{s}' does not denote an iteration statement",
+                                .{label_name},
+                            ),
+                            .{ .help = "A 'continue' statement can only jump to a label of an" ++
+                                " enclosing 'for', 'while', 'do-while', 'for-in', or 'for-of'" ++
+                                " statement" },
+                        );
+                    }
+                },
                 .not_found => try self.report(
                     ctx.tree.span(node_index),
                     try self.fmt("Use of undefined label '{s}'", .{label_name}),
@@ -842,16 +851,6 @@ pub const Checker = struct {
                         .{label_name},
                     ),
                     .{},
-                ),
-                .not_iteration => try self.report(
-                    ctx.tree.span(node_index),
-                    try self.fmt(
-                        "Label '{s}' does not denote an iteration statement",
-                        .{label_name},
-                    ),
-                    .{ .help = "A 'continue' statement can only jump to a label of an" ++
-                        " enclosing 'for', 'while', 'do-while', 'for-in', or 'for-of'" ++
-                        " statement" },
                 ),
             }
         } else {
@@ -874,17 +873,13 @@ pub const Checker = struct {
         _: ast.NodeIndex,
         ctx: *SemanticCtx,
     ) AnalysisError!Action {
-        const name = ctx.tree.string(ctx.tree.data(stmt.label).label_identifier.name);
+        const name = labelName(ctx.tree, stmt.label);
         var iter = ctx.path.ancestors();
-        _ = iter.next(); // skip current node
+        _ = iter.next(); // skip self
         while (iter.next()) |i| {
             const data = ctx.tree.data(i);
             if (data == .labeled_statement) {
-                const outer_label = data.labeled_statement.label;
-                const outer_name = ctx.tree.string(
-                    ctx.tree.data(outer_label).label_identifier.name,
-                );
-                if (eql(u8, outer_name, name)) {
+                if (eql(u8, labelName(ctx.tree, data.labeled_statement.label), name)) {
                     try self.report(
                         ctx.tree.span(stmt.label),
                         try self.fmt("Duplicate label '{s}'", .{name}),
@@ -943,12 +938,12 @@ pub const Checker = struct {
 
             // a body-less method is a ts overload, abstract, or ambient signature
             if (child_data == .method_definition) {
-                const md = child_data.method_definition;
-                const has_body = ctx.tree.data(md.value).function.body != .null;
-                if (md.kind == .constructor and has_body) {
+                const method = child_data.method_definition;
+                const has_body = ctx.tree.data(method.value).function.body != .null;
+                if (method.kind == .constructor and has_body) {
                     if (first_constructor) |first| {
                         try self.report(
-                            ctx.tree.span(md.key),
+                            ctx.tree.span(method.key),
                             "A class can only have one constructor",
                             .{ .labels = try self.labels(&.{
                                 self.label(
@@ -958,16 +953,11 @@ pub const Checker = struct {
                             }) },
                         );
                     } else {
-                        first_constructor = md.key;
+                        first_constructor = method.key;
                     }
                 }
             }
 
-            // duplicate PrivateBoundIdentifiers
-            //   class C { #x; #x; }             (duplicate field)
-            //   class C { #m; #m() {} }         (field + method conflict)
-            //   class C { get #x(){} }
-            //           { static set #x(_){} }  (static/non-static mismatch)
             const name_j = privateElementName(ctx.tree, child_data) orelse continue;
             const kind_j = privateElementKind(child_data);
 
@@ -1001,18 +991,18 @@ pub const Checker = struct {
 
     fn privateElementName(tree: *const ast.Tree, data: ast.NodeData) ?[]const u8 {
         const key = switch (data) {
-            .property_definition => |pd| pd.key,
-            .method_definition => |md| md.key,
+            inline .property_definition, .method_definition => |element| element.key,
             else => return null,
         };
-        if (tree.data(key) == .private_identifier)
-            return tree.string(tree.data(key).private_identifier.name);
-        return null;
+        return switch (tree.data(key)) {
+            .private_identifier => |id| tree.string(id.name),
+            else => null,
+        };
     }
 
     fn privateElementKind(data: ast.NodeData) PrivateElementKind {
         return switch (data) {
-            .method_definition => |md| switch (md.kind) {
+            .method_definition => |method| switch (method.kind) {
                 .get => .getter,
                 .set => .setter,
                 else => .method,
@@ -1023,8 +1013,7 @@ pub const Checker = struct {
 
     fn privateElementIsStatic(data: ast.NodeData) bool {
         return switch (data) {
-            .property_definition => |pd| pd.static,
-            .method_definition => |md| md.static,
+            inline .property_definition, .method_definition => |element| element.static,
             else => false,
         };
     }
@@ -1065,20 +1054,31 @@ pub const Checker = struct {
 
     // https://tc39.es/ecma262/#sec-keywords-and-reserved-words
     fn matchStrictReserved(name: []const u8) ?[]const u8 {
-        return switch (name.len) {
-            3 => check(name, "let"),
-            5 => check(name, "yield"),
-            6 => check(name, "static") orelse check(name, "public"),
-            7 => check(name, "private") orelse check(name, "package"),
-            9 => check(name, "protected") orelse check(name, "interface"),
-            10 => check(name, "implements"),
-            else => null,
-        };
+        // a length and first-letter bitmap rejects most names in one predictable branch
+        const initials = if (name.len < strict_reserved_initials.len)
+            strict_reserved_initials[name.len]
+        else
+            0;
+        const letter = (if (name.len > 0) name[0] else 0) -% 'a';
+        const initial = if (letter < 26) @as(u32, 1) << @intCast(letter) else 0;
+        if (initials & initial == 0) return null;
+        inline for (strict_reserved) |word| {
+            if (name.len == word.len and eql(u8, name, word)) return word;
+        }
+        return null;
     }
 
-    fn check(name: []const u8, keyword: []const u8) ?[]const u8 {
-        return if (eql(u8, name, keyword)) keyword else null;
-    }
+    const strict_reserved = [_][]const u8{
+        "let",     "yield",     "static",    "public",     "private",
+        "package", "protected", "interface", "implements",
+    };
+
+    // per length, a bit for the first letter of each word that long
+    const strict_reserved_initials = blk: {
+        var table: [11]u32 = @splat(0);
+        for (strict_reserved) |word| table[word.len] |= 1 << (word[0] - 'a');
+        break :blk table;
+    };
 
     // 14.7.5.1 allows one ForBinding and, outside annex B 3.5, no initializer
     fn checkForInOfInitializer(
@@ -1199,11 +1199,11 @@ pub const Checker = struct {
                             ctx.tree.data(parent).method_definition.kind == .constructor)
                         {
                             while (iter.next()) |ancestor| {
-                                if (ctx.tree.data(ancestor) == .class)
-                                    return if (ctx.tree.data(ancestor).class.super_class != .null)
-                                        .valid
-                                    else
-                                        .no_extends;
+                                if (ctx.tree.data(ancestor) != .class) continue;
+                                if (ctx.tree.data(ancestor).class.super_class == .null) {
+                                    return .no_extends;
+                                }
+                                return .valid;
                             }
                         }
                     }
@@ -1286,7 +1286,12 @@ pub const Checker = struct {
         return ctx.tree.source_type == .commonjs;
     }
 
-    const LabelSearch = enum { found, not_found, crossed_boundary };
+    const LabelSearch = union(enum) {
+        // the body of the labelled statement
+        found: ast.NodeIndex,
+        not_found,
+        crossed_boundary,
+    };
 
     fn findLabel(ctx: *SemanticCtx, name: []const u8) LabelSearch {
         std.debug.assert(name.len > 0);
@@ -1295,37 +1300,19 @@ pub const Checker = struct {
         while (iter.next()) |i| {
             const data = ctx.tree.data(i);
             if (data == .labeled_statement) {
-                const label_node = ctx.tree.data(data.labeled_statement.label);
-                const lbl_name = ctx.tree.string(label_node.label_identifier.name);
-                if (eql(u8, lbl_name, name))
-                    return if (crossed_boundary) .crossed_boundary else .found;
+                const statement = data.labeled_statement;
+                if (eql(u8, labelName(ctx.tree, statement.label), name)) {
+                    if (crossed_boundary) return .crossed_boundary;
+                    return .{ .found = statement.body };
+                }
             }
             if (isFunctionBoundary(data)) crossed_boundary = true;
         }
         return .not_found;
     }
 
-    const ContinueLabelSearch = enum { found, not_found, crossed_boundary, not_iteration };
-
-    fn findLabelForContinue(ctx: *SemanticCtx, name: []const u8) ContinueLabelSearch {
-        std.debug.assert(name.len > 0);
-        var crossed_boundary = false;
-        var iter = ctx.path.ancestors();
-        while (iter.next()) |i| {
-            const data = ctx.tree.data(i);
-            if (data == .labeled_statement) {
-                const ls = data.labeled_statement;
-                const lbl_name = ctx.tree.string(ctx.tree.data(ls.label).label_identifier.name);
-                if (eql(u8, lbl_name, name)) {
-                    if (crossed_boundary) return .crossed_boundary;
-                    const body = ctx.tree.data(ls.body);
-                    if (body.isIteration() or body == .labeled_statement) return .found;
-                    return .not_iteration;
-                }
-            }
-            if (isFunctionBoundary(data)) crossed_boundary = true;
-        }
-        return .not_found;
+    fn labelName(tree: *const ast.Tree, label_node: ast.NodeIndex) []const u8 {
+        return tree.string(tree.data(label_node).label_identifier.name);
     }
 
     fn isInsideStaticBlock(ctx: *SemanticCtx) bool {
@@ -1364,18 +1351,9 @@ pub const Checker = struct {
         return null;
     }
 
-    fn isAnnexBDuplicate(ctx: *SemanticCtx, node: ast.NodeIndex, existing: semantic.SymbolId) bool {
-        if (ctx.scope.get(ctx.symbols.pending.scope).flags.strict) return false;
-        return isPlainFunction(ctx, node) and
-            isPlainFunction(ctx, ctx.symbols.firstDeclOf(existing));
-    }
-
-    fn isPlainFunction(ctx: *SemanticCtx, binding: ast.NodeIndex) bool {
-        const parent = ctx.parentOf(binding) orelse return false;
-        return switch (ctx.tree.data(parent)) {
-            .function => |f| !f.async and !f.generator,
-            else => false,
-        };
+    // annex B lets a sloppy block declare a plain function twice (B.3.2.4)
+    fn isAnnexBDuplicate(self: *const Self, node: ast.NodeIndex, first: ast.NodeIndex) bool {
+        return self.plain_functions.contains(node) and self.plain_functions.contains(first);
     }
 
     fn getModuleExportName(tree: *const ast.Tree, node: ast.NodeIndex) []const u8 {
@@ -1495,11 +1473,10 @@ pub const Checker = struct {
     /// Reports local export specifiers that name no declared binding, and the
     /// TypeScript duplicate exports, which depend on every export of a name.
     /// Runs after the traversal.
-    pub fn checkExports(self: *Self, sem: Semantic) AnalysisError!void {
+    pub fn checkExports(self: *Self, symbols: *const semantic.SymbolTracker) AnalysisError!void {
         if (!self.tree.isModule()) return;
         for (self.export_specifiers.items) |spec| {
-            const found = sem.binding(.module, spec.local_name);
-            if (found == null) {
+            if (symbols.binding(.module, spec.local_name) == null) {
                 try self.report(
                     self.tree.span(spec.node),
                     try self.fmt("Export '{s}' is not defined", .{spec.local_name}),
@@ -1545,18 +1522,16 @@ pub const Checker = struct {
 
     fn reportRedeclaration(
         self: *Self,
-        id: ast.BindingIdentifier,
+        name: []const u8,
         node_index: ast.NodeIndex,
         existing_id: semantic.SymbolId,
-        existing: Symbol,
         ctx: *SemanticCtx,
     ) Allocator.Error!void {
         std.debug.assert(existing_id != .none);
         std.debug.assert(node_index != .null);
-        const name = ctx.tree.string(id.name);
         const current_span = ctx.tree.span(node_index);
         const existing_span = ctx.tree.span(ctx.symbols.firstDeclOf(existing_id));
-        const kind = existing.flags.toString();
+        const kind = ctx.symbols.symbol(existing_id).flags.toString();
         std.debug.assert(kind.len > 0);
         const article: []const u8 = switch (kind[0]) {
             'a', 'e', 'i', 'o', 'u' => "an",

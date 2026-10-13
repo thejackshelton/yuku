@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { parse, type Program } from "yuku-parser";
-import { generate } from "yuku-codegen";
+import { parse, type Node, type Program } from "yuku-parser";
+import { generate, type Printer, type Printers } from "yuku-codegen";
 import { findAll, walk } from "yuku-ast";
 import { TraceMap, decodedMappings } from "@jridgewell/trace-mapping";
 import { gen } from "./helpers";
@@ -102,4 +102,39 @@ test("a value that is not a node throws", () => {
   for (const value of [null, undefined, {}, { type: 1 }]) {
     expect(() => generate(value as never)).toThrow("Expected an AST node");
   }
+});
+
+// a plain-object dialect node prints through `print`, and a type with no printer throws
+test("print prints the node types the printer does not know", () => {
+  const { program } = parse("items; render(item);");
+  type Each = { type: "EachStatement"; start: number; end: number; list: Node; body: Node[] };
+  const [items, render] = program.body;
+  if (items?.type !== "ExpressionStatement" || !render) throw new Error("two statements");
+  const each: Each = {
+    type: "EachStatement",
+    start: 0,
+    end: 0,
+    list: items.expression,
+    body: [render],
+  };
+  const print = {
+    EachStatement(node: Each, w: Printer) {
+      w.write("each");
+      w.space();
+      w.write("(");
+      w.node(node.list);
+      w.write(")");
+      w.space();
+      w.block(node.body);
+    },
+  } as unknown as Printers;
+
+  expect(generate(each as unknown as Node, { print }).code).toMatchInlineSnapshot(`
+    "each (items) {
+      render(item);
+    }"
+  `);
+  expect(generate(each as unknown as Node, { print, format: "compact" }).code)
+    .toMatchInlineSnapshot(`"each(items){render(item)}"`);
+  expect(() => generate(each as unknown as Node)).toThrow("unsupported node type: EachStatement");
 });

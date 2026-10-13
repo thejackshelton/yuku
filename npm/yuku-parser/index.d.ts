@@ -1,9 +1,11 @@
 import type {
+  BaseNode,
   Comment,
-  Core,
   Diagnostic,
   FileOptions,
   Program,
+  SourceLang,
+  SourceType,
   TokenKindMap,
   TokenList,
 } from "@yuku-toolchain/types";
@@ -12,10 +14,10 @@ export * from "@yuku-toolchain/types";
 
 interface ParseOptions extends FileOptions {
   /**
-   * The core that parses, from `load` in `yuku-core` or `@yuku-core/wasm`.
-   * @default the native core
+   * The build of Yuku that parses, one with a dialect compiled in.
+   * @default the module yuku-parser ships
    */
-  core?: Core;
+  wasm?: WebAssembly.Module;
   /**
    * Keep `ParenthesizedExpression` nodes. When false, only the inner expression is kept.
    * @default true
@@ -27,7 +29,7 @@ interface ParseOptions extends FileOptions {
    */
   semanticErrors?: boolean;
   /**
-   * Also attach each comment to its node, see {@link BaseNode.comments}.
+   * Also attach each comment to its node. See {@link BaseNode.comments}.
    * @default false
    */
   attachComments?: boolean;
@@ -53,6 +55,16 @@ export function parse(source: string, options?: ParseOptions): ParseResult;
 export const TokenKind: TokenKindMap;
 export type TokenKind = TokenKindMap[keyof TokenKindMap];
 
-export { langFromPath, sourceTypeFromPath } from "yuku-core";
+/**
+ * Resolves once the WebAssembly is compiled. A browser compiles it after import, so it awaits
+ * `ready` before the first parse. Node.js, Bun, Deno, and Workers compile it on import.
+ */
+export const ready: Promise<void>;
+
+/** The `lang` a path implies: `"dts"`, `"tsx"`, `"ts"`, `"jsx"`, or `"js"`. */
+export function langFromPath(path: string): SourceLang;
+
+/** The `sourceType` a path implies: `"commonjs"` for `.cjs` and `.cts`, else `"module"`. */
+export function sourceTypeFromPath(path: string): SourceType;
 
 export type { ParseOptions, ParseResult };

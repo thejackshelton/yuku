@@ -42,6 +42,23 @@ import {
 type Node = T.Node;
 type Comment = T.AttachedComment;
 
+/** The printer as a `print` function drives it. */
+export interface Printer {
+  /** Writes code, spaced from the code before it where the two would merge. */
+  write(code: string): void;
+  /** Writes a space in the pretty format. */
+  space(): void;
+  /** Prints any node, with its comments. */
+  node(node: Node | null): void;
+  /** Prints statements as a braced block. */
+  block(items: Node[]): void;
+}
+
+/** Prints the node types the printer does not know, such as a dialect's, by `type`. */
+export type Printers = {
+  [K in T.NodeType]?: (node: T.NodeOfType<K>, printer: Printer) => void;
+};
+
 export interface PrintOptions {
   strip: boolean;
   minify: boolean;
@@ -49,12 +66,15 @@ export interface PrintOptions {
   indent: number;
   quotes: "preserve" | "double" | "single" | "shortest";
   comments: "none" | "all" | "some" | "line" | "block";
+  print: Printers;
 }
 
 export interface PrintResult {
   code: string;
   diagnostics: T.Diagnostic[];
 }
+
+const hasOwn = Object.prototype.hasOwnProperty;
 
 const PREC_LOWEST = 0;
 const PREC_COMMA = 1;
@@ -220,18 +240,21 @@ interface Link {
 }
 
 export function print(node: Node, options: PrintOptions, mappings: Mappings | null): PrintResult {
-  const printer = new Printer(options, mappings);
+  const printer = new NodePrinter(options, mappings);
   printer.emit(node);
   return { code: printer.finish(), diagnostics: printer.diagnostics };
 }
 
-class Printer extends Output {
+class NodePrinter extends Output implements Printer {
   readonly strip: boolean;
   readonly minify: boolean;
   readonly indentWidth: number;
   readonly quotes: PrintOptions["quotes"];
   readonly comments: PrintOptions["comments"];
+  readonly print: Printers;
   diagnostics: T.Diagnostic[] = [];
+  // the node a `print` function is printing, whose comments an empty `block` holds
+  printing: Node | null = null;
 
   indentDepth = 0;
   pendingSemi = false;
@@ -258,6 +281,19 @@ class Printer extends Output {
     this.indentWidth = options.indent;
     this.quotes = options.quotes;
     this.comments = options.comments;
+    this.print = options.print;
+  }
+
+  write(code: string): void {
+    this.writeToken(code);
+  }
+
+  node(node: Node | null): void {
+    this.emit(node);
+  }
+
+  block(items: Node[]): void {
+    this.printBlock(items, false, this.printing!);
   }
 
   newline(): void {
@@ -590,9 +626,7 @@ class Printer extends Output {
     const prec = ctx & CTX_PREC;
     if (this.lead !== LEAD_NONE && this.leadNeedsParens(node, type)) return true;
     const flags = CTX_NO_CALL | CTX_NO_IN | CTX_NO_INSTANTIATION;
-    if ((ctx & flags) !== 0 && this.flagNeedsParens(node, type, ctx)) {
-      return true;
-    }
+    if ((ctx & flags) !== 0 && this.flagNeedsParens(node, type, ctx)) return true;
     if (prec <= PREC_ASSIGNMENT) return prec === PREC_ASSIGNMENT && type === "SequenceExpression";
     if (prec >= PREC_CALL && type === "ChainExpression") return true;
     return this.precedenceOf(node, type) < prec;
@@ -601,11 +635,9 @@ class Printer extends Output {
   leadNeedsParens(node: Node, type: string): boolean {
     if (this.lead === LEAD_STMT || this.lead === LEAD_ARROW) {
       if (type === "ObjectExpression") return true;
-      if (
-        type === "AssignmentExpression" &&
-        (node as T.AssignmentExpression).left.type === "ObjectPattern"
-      )
-        return true;
+      if (type === "AssignmentExpression") {
+        return (node as T.AssignmentExpression).left.type === "ObjectPattern";
+      }
     }
     if (this.lead === LEAD_STMT || this.lead === LEAD_EXPORT_DEFAULT) {
       switch (type) {
@@ -685,11 +717,7 @@ class Printer extends Output {
         return this.emitVariableDeclaration(node as T.VariableDeclaration);
       case "BinaryExpression": {
         const e = node as T.BinaryExpression;
-        const headCtx =
-          binaryLeftPrecedence(e) |
-          (ctx & CTX_NO_IN) |
-          (canFollowTypeArguments(e.operator) ? 0 : CTX_NO_INSTANTIATION);
-        this.emitLinkHead(e.left as Node, headCtx);
+        this.emitLinkHead(e.left as Node, binaryHeadCtx(e, ctx));
         return this.emitBinarySuffix(e, ctx);
       }
       case "ReturnStatement":
@@ -706,10 +734,7 @@ class Printer extends Output {
         return this.emitUnaryExpression(node as T.UnaryExpression, ctx);
       case "LogicalExpression": {
         const e = node as T.LogicalExpression;
-        const headCtx =
-          this.logicalOperandPrecedence(e.left, OPERATOR_PRECEDENCE[e.operator]!, e.operator) |
-          (ctx & CTX_NO_IN);
-        this.emitLinkHead(e.left, headCtx);
+        this.emitLinkHead(e.left, this.logicalHeadCtx(e, ctx));
         return this.emitLogicalSuffix(e, ctx);
       }
       case "AssignmentExpression":
@@ -1033,20 +1058,9 @@ class Printer extends Output {
   linkHeadCtx(node: Node, ctx: number): number {
     switch (node.type) {
       case "BinaryExpression":
-        return (
-          binaryLeftPrecedence(node) |
-          (ctx & CTX_NO_IN) |
-          (canFollowTypeArguments(node.operator) ? 0 : CTX_NO_INSTANTIATION)
-        );
+        return binaryHeadCtx(node, ctx);
       case "LogicalExpression":
-        return (
-          this.logicalOperandPrecedence(
-            node.left,
-            OPERATOR_PRECEDENCE[node.operator]!,
-            node.operator,
-          ) |
-          (ctx & CTX_NO_IN)
-        );
+        return this.logicalHeadCtx(node, ctx);
       // TypeScript rejects `f<T>?.x`, and minify prints `?.["x"]` as `?.x`
       case "MemberExpression":
       case "TaggedTemplateExpression":
@@ -1140,6 +1154,11 @@ class Printer extends Output {
     if (e.optional) this.writeToken("?.");
     this.emit(e.typeArguments);
     this.printArgList(e.arguments);
+  }
+
+  logicalHeadCtx(e: T.LogicalExpression, ctx: number): number {
+    const p = OPERATOR_PRECEDENCE[e.operator]!;
+    return this.logicalOperandPrecedence(e.left, p, e.operator) | (ctx & CTX_NO_IN);
   }
 
   logicalOperandPrecedence(child: Node, min: number, parent: string): number {
@@ -1801,9 +1820,10 @@ class Printer extends Output {
   emitStringLiteral(lit: T.StringLiteral): void {
     const raw = typeof lit.raw === "string" ? lit.raw : "";
     const q = this.pickQuote(lit.value, raw.charCodeAt(0) === CHAR_SINGLE_QUOTE);
-    this.writeToken(q === CHAR_SINGLE_QUOTE ? "'" : '"');
+    const quote = q === CHAR_SINGLE_QUOTE ? "'" : '"';
+    this.writeToken(quote);
     this.writeEscapedString(lit.value, q);
-    this.writeLiteral(q === CHAR_SINGLE_QUOTE ? "'" : '"');
+    this.writeLiteral(quote);
   }
 
   pickQuote(s: string, singleQuoted: boolean): number {
@@ -2022,10 +2042,7 @@ class Printer extends Output {
       this.closeItem(false, depth);
     }
     this.closeList(depth);
-    if (rest === null && count > 0 && elements[count - 1] == null) {
-      // a trailing hole needs its own comma, else `[a,]` is one element
-      this.writeToken(",");
-    }
+    if (rest === null && count > 0 && elements[count - 1] == null) this.writeToken(",");
     this.writeToken("]");
     this.printBindingSuffix(p.optional === true, definite, p.typeAnnotation);
   }
@@ -2234,9 +2251,7 @@ class Printer extends Output {
     if (this.strip && (isAbstract || fn.body == null)) return;
     this.printDecorators(m.decorators);
     this.hoistKeyComments(m.key);
-    if (!this.strip && m.accessibility != null) {
-      this.writeKeyword(m.accessibility);
-    }
+    if (!this.strip && m.accessibility != null) this.writeKeyword(m.accessibility);
     if (m.static) this.writeKeyword("static");
     if (!this.strip) {
       if (isAbstract) this.writeKeyword("abstract");
@@ -2274,9 +2289,7 @@ class Printer extends Output {
     this.hoistKeyComments(p.key);
     if (!this.strip) {
       if (p.declare === true) this.writeKeyword("declare");
-      if (p.accessibility != null) {
-        this.writeKeyword(p.accessibility);
-      }
+      if (p.accessibility != null) this.writeKeyword(p.accessibility);
     }
     if (p.static) this.writeKeyword("static");
     if (!this.strip) {
@@ -2378,22 +2391,20 @@ class Printer extends Output {
     const list = d.specifiers;
     if (this.strip) {
       if (d.exportKind === "type") return;
-      const noValueSpecifiers =
-        d.declaration == null && list.length > 0 && !hasValueExportSpecifier(list);
-      if (noValueSpecifiers) return;
-    }
-
-    if (this.strip && d.declaration != null && this.stripsToNothing(d.declaration)) {
-      return this.emitNothing(d.declaration);
+      if (d.declaration != null) {
+        if (this.stripsToNothing(d.declaration)) return this.emitNothing(d.declaration);
+      } else if (list.length > 0 && !hasValueExportSpecifier(list)) {
+        return;
+      }
     }
     const hoisted = decoratorsBeforeExport(d.declaration);
     if (hoisted !== null) this.printDecorators(hoisted);
     this.writeToken("export");
-    if (d.exportKind === "type" && d.declaration == null) this.writeToken(" type");
     if (d.declaration != null) {
       this.writeToken(" ");
       return this.emitExpr(d.declaration, hoisted !== null ? CTX_NO_DECORATORS : 0);
     }
+    if (d.exportKind === "type") this.writeToken(" type");
     this.writeSpaced(" {", "{");
     this.emitInsideCommentsInline(d);
     if (list.length > 0) {
@@ -2728,14 +2739,19 @@ class Printer extends Output {
         return this.writeToken(")");
       case "TSParameterProperty":
         this.printDecorators(node.decorators);
-        if (node.accessibility != null) {
-          this.writeKeyword(node.accessibility);
-        }
+        if (node.accessibility != null) this.writeKeyword(node.accessibility);
         if (node.override) this.writeKeyword("override");
         if (node.readonly) this.writeKeyword("readonly");
         return this.emit(node.parameter);
     }
-    throw new Error("yuku-codegen: unsupported node type: " + node.type);
+    const print = hasOwn.call(this.print, node.type)
+      ? (this.print[node.type as T.NodeType] as (node: Node, printer: Printer) => void)
+      : undefined;
+    if (print === undefined) throw new Error("yuku-codegen: unsupported node type: " + node.type);
+    const printing = this.printing;
+    this.printing = node;
+    print(node, this);
+    this.printing = printing;
   }
 
   emitTSImportType(t: T.TSImportType): void {
@@ -2770,9 +2786,9 @@ class Printer extends Output {
   }
 
   emitTSTypeParameterDeclaration(d: T.TSTypeParameterDeclaration, ctx: number): void {
-    this.writeToken("<");
-    this.emitList(d.params);
     const params = d.params;
+    this.writeToken("<");
+    this.emitList(params);
     // in TSX a lone `<T>` opens a JSX tag, and `<T,>` is valid TS too
     if ((ctx & CTX_NO_JSX_TAG) !== 0 && params.length === 1) {
       if (params[0]!.constraint == null) this.writeToken(",");
@@ -2831,12 +2847,10 @@ class Printer extends Output {
         this.writeKeyword("readonly");
         break;
       case "+":
-        this.writeToken("+");
-        this.writeKeyword("readonly");
+        this.writeKeyword("+readonly");
         break;
       case "-":
-        this.writeToken("-");
-        this.writeKeyword("readonly");
+        this.writeKeyword("-readonly");
         break;
     }
     this.writeToken("[");
@@ -3118,6 +3132,11 @@ function endsWithTsCast(node: Node): boolean {
     }
     return false;
   }
+}
+
+function binaryHeadCtx(e: T.BinaryExpression, ctx: number): number {
+  const instantiation = canFollowTypeArguments(e.operator) ? 0 : CTX_NO_INSTANTIATION;
+  return binaryLeftPrecedence(e) | (ctx & CTX_NO_IN) | instantiation;
 }
 
 // TypeScript reads `f<T>` as comparisons before `<`, `>`, `+`, or `-`, and its scanner starts

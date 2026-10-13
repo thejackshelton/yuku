@@ -48,6 +48,7 @@ pub fn main() !void {
 | `preserve_parens` | `true`    | Keep `parenthesized_expression` nodes, or only their inner expression                          |
 | `comments`        | `.flat`   | `.none`, `.flat`, `.attached`, or `.both`, see [Comments](/parser/ast/#comments)               |
 | `tokens`          | `false`   | Keep every token, see [Tokens](/parser/ast/#tokens)                                            |
+| `dialect`         | `false`   | Read the source with the [dialect](/parser/dialect/) compiled into the parser                  |
 
 `.fromPath` infers `source_type` and `lang` from a file name, as in `.lang = .fromPath("app.tsx")`.
 

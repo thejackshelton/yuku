@@ -1,9 +1,10 @@
 const std = @import("std");
 const ast = @import("../ast.zig");
 const sc = @import("scope.zig");
-const String = ast.String;
+const dialect = @import("../dialect.zig");
 
 const Allocator = std.mem.Allocator;
+const String = ast.String;
 
 /// Identifier for a `Symbol`. `.none` means absent.
 pub const SymbolId = enum(u32) { none = std.math.maxInt(u32), _ };
@@ -19,14 +20,6 @@ pub const Range = struct { start: u32, len: u32 };
 /// A declared binding. Declarations that legally share a name, such as
 /// `var` redeclarations, TS overloads, and `class` + `interface`
 /// merging, merge into one symbol.
-///
-/// ## Example
-/// ```ts
-/// interface Shape { kind: string }
-/// class Shape { kind = "circle" }
-/// //    ^^^^^ one symbol with two declarations, occupying
-/// //          both value space and type space
-/// ```
 pub const Symbol = struct {
     name: String,
     flags: Flags,
@@ -91,17 +84,6 @@ pub const Symbol = struct {
 
         /// True when a symbol with these flags is visible in `space`.
         /// Import bindings are visible in every space.
-        ///
-        /// ## Example
-        /// ```ts
-        /// type T = string;
-        /// function f() {
-        ///   const T = 1;
-        ///   let x: T;
-        ///   //     ^ the const is not visible in .type, so
-        ///   //       resolution walks on to the outer alias
-        /// }
-        /// ```
         pub fn visibleIn(self: Flags, space: Reference.Space) bool {
             if (self.intersects(any_import)) return true;
             return switch (space) {
@@ -242,7 +224,7 @@ pub const Symbol = struct {
 
         pub const namespace_module: Flags = .{};
 
-        pub const import_binding: Flags = .{ .import = true, .type_import = true };
+        pub const import_binding: Flags = any_import;
 
         pub const parameter: Flags = blk: {
             var f = value_space;
@@ -427,9 +409,9 @@ pub const Semantic = struct {
         return .{ .node_parents = self.node_parents, .current = node };
     }
 
-    /// The name node of every declaration of `id`, in
-    /// source order. A conflicting redeclaration is recorded here too, so
-    /// check `tree.hasErrors()` when only legal declarations matter.
+    /// The name node of every declaration of `id`, in source order. A
+    /// conflicting redeclaration is recorded too, so check `tree.hasErrors()`
+    /// when only legal declarations matter.
     ///
     /// ## Example
     /// ```ts
@@ -476,7 +458,7 @@ pub const Semantic = struct {
     }
 
     /// The nearest binding of `name` visible in `space` from `scope`, walking up the
-    /// scope chain and the other blocks of each namespace or enum on it. A binding
+    /// scope chain and the other bodies of each namespace or enum on it. A binding
     /// outside the space does not shadow.
     ///
     /// ## Example
@@ -484,8 +466,7 @@ pub const Semantic = struct {
     /// type T = string;
     /// function f() {
     ///   const T = 1;
-    ///   // from here .type finds the outer alias, .value the
-    ///   // local const, .any the nearest by name
+    ///   // here .type finds the alias, .value the const, .any the nearest
     /// }
     /// ```
     pub fn lookup(
@@ -627,14 +608,25 @@ const Bodies = struct {
     }
 };
 
-const PrehashCtx = struct {
-    h: u64,
-    pub fn hash(self: @This(), _: []const u8) u64 {
-        return self.h;
+// hashes a name once for its lookups in every scope of the chain
+const PrehashedContext = struct {
+    hash_value: u64,
+
+    pub fn hash(self: PrehashedContext, _: []const u8) u64 {
+        return self.hash_value;
     }
-    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
+
+    pub fn eql(_: PrehashedContext, a: []const u8, b: []const u8) bool {
         return std.mem.eql(u8, a, b);
     }
+};
+
+/// What a semantic walk records.
+pub const Mode = enum {
+    /// Scopes and bindings, all the early-error checker reads.
+    check,
+    /// Also references and the scope and parent of every node, for the `Semantic` model.
+    analyze,
 };
 
 /// Collects symbols and references during the AST walk and finalizes
@@ -677,17 +669,7 @@ pub const SymbolTracker = struct {
         scope: sc.ScopeId = .root,
     };
 
-    /// Per-node facts computed by the walker for `declareBindings`.
-    pub const RefContext = struct {
-        /// The node is an identifier in assignment-target position.
-        is_write: bool,
-        /// The declaration space the identifier resolves in.
-        space: Reference.Space = .value,
-        /// The identifier is erased with the types.
-        type_position: bool = false,
-    };
-
-    const DeclPair = struct { sid: SymbolId, node: ast.NodeIndex };
+    const DeclPair = struct { symbol: SymbolId, node: ast.NodeIndex };
 
     const SavedContext = struct {
         pending: PendingBinding,
@@ -695,7 +677,7 @@ pub const SymbolTracker = struct {
         ambient: bool,
     };
 
-    pub fn init(tree: *ast.Tree) Allocator.Error!SymbolTracker {
+    pub fn init(tree: *ast.Tree, mode: Mode) Allocator.Error!SymbolTracker {
         std.debug.assert(tree.root != .null);
 
         const alloc = tree.allocator();
@@ -709,7 +691,7 @@ pub const SymbolTracker = struct {
         const nodes: u32 = @intCast(tree.nodes.len);
         try self.symbols.ensureTotalCapacity(alloc, @max(16, nodes / 12));
         try self.first_decls.ensureTotalCapacity(alloc, @max(16, nodes / 12));
-        try self.references.ensureTotalCapacity(alloc, @max(16, nodes / 4));
+        if (mode == .analyze) try self.references.ensureTotalCapacity(alloc, @max(16, nodes / 4));
         try self.decl_pairs.ensureTotalCapacity(alloc, @max(16, nodes / 12));
         try self.scope_maps.ensureTotalCapacity(alloc, @max(8, nodes / 16));
         try self.hoisting_variables.ensureTotalCapacity(alloc, @max(8, nodes / 16));
@@ -863,27 +845,29 @@ pub const SymbolTracker = struct {
                 };
             },
 
-            // the id binds outside the scope the tracker pushed for the body
-            .ts_interface_declaration => |decl| {
+            .dialect => |node| if (dialect.shape(node.kind).lexical_bindings) {
                 try self.pushSavedContext();
                 self.pending = .{
-                    .flags = .{
-                        .interface = true,
-                        .ambient = decl.declare or self.ambient,
-                    },
-                    .excludes = Symbol.Excludes.interface,
-                    .scope = scope.currentScope().parent,
+                    .flags = .{ .block_scoped_var = true },
+                    .excludes = Symbol.Excludes.block_scoped_var.merge(self.excluded_imports),
+                    .scope = scope.current,
                 };
             },
 
-            .ts_type_alias_declaration => |decl| {
+            // the id binds outside the scope the tracker pushed for the body
+            inline .ts_interface_declaration, .ts_type_alias_declaration => |decl, tag| {
                 try self.pushSavedContext();
+                const interface = tag == .ts_interface_declaration;
                 self.pending = .{
                     .flags = .{
-                        .type_alias = true,
+                        .interface = interface,
+                        .type_alias = !interface,
                         .ambient = decl.declare or self.ambient,
                     },
-                    .excludes = Symbol.Excludes.type_alias,
+                    .excludes = if (interface)
+                        Symbol.Excludes.interface
+                    else
+                        Symbol.Excludes.type_alias,
                     .scope = scope.currentScope().parent,
                 };
             },
@@ -1013,25 +997,31 @@ pub const SymbolTracker = struct {
         });
     }
 
-    /// Declares the pending binding at a `binding_identifier` or records
-    /// a reference. Called for every node after its enter hook, before its children.
+    fn popSavedContext(self: *SymbolTracker) void {
+        const saved = self.saved_stack.pop() orelse return;
+        self.pending = saved.pending;
+        self.export_state = saved.export_state;
+        self.ambient = saved.ambient;
+    }
+
+    /// Declares the pending binding at a `binding_identifier`, and the names other nodes
+    /// declare. Called for every node after its enter hook, before its children.
     pub fn declareBindings(
         self: *SymbolTracker,
         index: ast.NodeIndex,
         data: ast.NodeData,
         scope: *const sc.ScopeTracker,
-        ref_ctx: RefContext,
+        type_position: bool,
     ) Allocator.Error!void {
-        if (self.scope_maps.items.len < scope.scopes.items.len)
+        if (self.scope_maps.items.len < scope.scopes.items.len) {
             try self.syncScopeMaps(scope.scopes.items.len);
+        }
 
         switch (data) {
             .binding_identifier => |id| {
                 const flags = self.pending.flags;
                 // in a type, only type parameters and parameters declare
-                if (ref_ctx.type_position and !flags.type_parameter and !flags.parameter) {
-                    return;
-                }
+                if (type_position and !flags.type_parameter and !flags.parameter) return;
 
                 const sym_id = try self.declare(id.name, index, scope.scopes.items);
                 if (flags.namespace_module or flags.regular_enum or flags.const_enum) {
@@ -1041,9 +1031,9 @@ pub const SymbolTracker = struct {
                 // visible in every block it passes through so redeclarations see it
                 if (flags.isHoistingVar()) {
                     var iter = scope.ancestors(scope.current);
-                    while (iter.next()) |s| {
-                        if (s == self.pending.scope) break;
-                        const table = &self.hoisting_variables.items[@backingInt(s)];
+                    while (iter.next()) |scope_id| {
+                        if (scope_id == self.pending.scope) break;
+                        const table = &self.hoisting_variables.items[@backingInt(scope_id)];
                         const gop = try table.getOrPut(self.allocator, self.tree.string(id.name));
                         if (!gop.found_existing) gop.value_ptr.* = sym_id;
                     }
@@ -1054,35 +1044,9 @@ pub const SymbolTracker = struct {
                     try self.declareQualifiedNamespace(decl, scope);
                 }
             },
-            .identifier_reference => |id| {
-                _ = try self.addReference(id.name, scope.current, index, .{
-                    .write = ref_ctx.is_write,
-                    .space = ref_ctx.space,
-                    .type_position = ref_ctx.type_position,
-                });
-            },
-            // `v is T` parses `v` as an identifier_name but it references the
-            // parameter binding, renamers need the link
-            //
-            //   function isStr(v: unknown): v is string {}
-            //                  ^            ^ references the parameter
-            .ts_type_predicate => |pred| {
-                if (pred.parameter_name == .null) return;
-                const pname = self.tree.data(pred.parameter_name);
-                if (pname != .identifier_name) return;
-                const name = pname.identifier_name.name;
-                const param = self.ownBinding(scope.current, self.tree.string(name)) orelse return;
-                if (!self.symbol(param).flags.parameter) return;
-                _ = try self.addReference(name, scope.current, pred.parameter_name, .{
-                    .space = .typeof,
-                    .type_position = true,
-                });
-            },
-            // members resolve lexically inside the body like tsc, and their
-            // names are not binding identifiers so they declare here
-            //
+            // member names are not binding identifiers, and tsc resolves them lexically
             //   enum E { a, b = a }
-            //   //              ^ resolves to the member, tsc-compatible
+            //   //              ^ the member
             .ts_enum_member => |member| {
                 if (member.computed) return;
                 const name = switch (self.tree.data(member.id)) {
@@ -1099,6 +1063,37 @@ pub const SymbolTracker = struct {
                 _ = try self.declare(name, member.id, scope.scopes.items);
                 self.pending = saved;
             },
+            else => {},
+        }
+    }
+
+    /// Records the uses of names at a node, with `identifier_flags` for an
+    /// `identifier_reference`. Called after `declareBindings` in an `analyze` walk.
+    pub fn addReferences(
+        self: *SymbolTracker,
+        index: ast.NodeIndex,
+        data: ast.NodeData,
+        scope: *const sc.ScopeTracker,
+        identifier_flags: Reference.Flags,
+    ) Allocator.Error!void {
+        switch (data) {
+            .identifier_reference => |id| {
+                try self.addReference(id.name, scope.current, index, identifier_flags);
+            },
+            // the `v` of `v is T` is an identifier_name, but renamers need its parameter link
+            .ts_type_predicate => |predicate| {
+                if (predicate.parameter_name == .null) return;
+                const name = switch (self.tree.data(predicate.parameter_name)) {
+                    .identifier_name => |id| id.name,
+                    else => return,
+                };
+                const param = self.ownBinding(scope.current, self.tree.string(name)) orelse return;
+                if (!self.symbol(param).flags.parameter) return;
+                try self.addReference(name, scope.current, predicate.parameter_name, .{
+                    .space = .typeof,
+                    .type_position = true,
+                });
+            },
             // like the JSX transforms, a lone tag starting with a-z or holding a `-` is an
             // intrinsic string, and a member tag references its leftmost object unless `this`
             inline .jsx_opening_element, .jsx_closing_element => |el| {
@@ -1110,7 +1105,7 @@ pub const SymbolTracker = struct {
                     else
                         text.len > 0 and !std.ascii.isLower(text[0]);
                     if (is_value and std.mem.findScalar(u8, text, '-') == null) {
-                        _ = try self.addReference(id.name, scope.current, root_idx, .{});
+                        try self.addReference(id.name, scope.current, root_idx, .{});
                     }
                 }
             },
@@ -1161,11 +1156,11 @@ pub const SymbolTracker = struct {
     /// Restores the context saved by the matching enter. Safe for any node.
     pub fn exit(self: *SymbolTracker, data: ast.NodeData) void {
         switch (data) {
+            // the export state stays cleared so the body declares nothing exported
             .formal_parameters => {
-                if (self.saved_stack.pop()) |saved| {
-                    self.pending = saved.pending;
-                    self.ambient = saved.ambient;
-                }
+                const saved = self.saved_stack.pop() orelse return;
+                self.pending = saved.pending;
+                self.ambient = saved.ambient;
             },
 
             .variable_declaration,
@@ -1184,24 +1179,20 @@ pub const SymbolTracker = struct {
             .ts_type_parameter,
             .ts_mapped_type,
             .ts_index_signature,
-            => {
-                if (self.saved_stack.pop()) |saved| {
-                    self.pending = saved.pending;
-                    self.export_state = saved.export_state;
-                    self.ambient = saved.ambient;
-                }
-            },
+            => self.popSavedContext(),
 
             .export_named_declaration, .export_default_declaration => self.export_state = .none,
+
+            .dialect => |node| if (dialect.shape(node.kind).lexical_bindings) {
+                self.popSavedContext();
+            },
 
             else => {},
         }
     }
 
-    /// Declares the pending binding for `name` at `node`, merging into a
-    /// compatible existing symbol. A conflicting name leaves the existing
-    /// flags unchanged but still records `node` as a declarator for error recovery.
-    pub fn declare(
+    // a conflicting declaration keeps the existing flags but still records `node`
+    fn declare(
         self: *SymbolTracker,
         name: String,
         node: ast.NodeIndex,
@@ -1251,7 +1242,7 @@ pub const SymbolTracker = struct {
             break :sid new_id;
         };
 
-        try self.decl_pairs.append(self.allocator, .{ .sid = id, .node = node });
+        try self.decl_pairs.append(self.allocator, .{ .symbol = id, .node = node });
         return id;
     }
 
@@ -1277,26 +1268,23 @@ pub const SymbolTracker = struct {
         return self.bodies(scopes).sharedMember(target, name, .any);
     }
 
-    /// Records an identifier reference at `node` in `scope`.
-    pub fn addReference(
+    fn addReference(
         self: *SymbolTracker,
         name: String,
         scope: sc.ScopeId,
         node: ast.NodeIndex,
         flags: Reference.Flags,
-    ) Allocator.Error!ReferenceId {
+    ) Allocator.Error!void {
         std.debug.assert(scope != .none);
         std.debug.assert(node != .null);
         std.debug.assert(self.references.items.len < std.math.maxInt(u32));
 
-        const id: ReferenceId = @fromBackingInt(@intCast(self.references.items.len));
         try self.references.append(self.allocator, .{
             .name = name,
             .scope = scope,
             .node = node,
             .flags = flags,
         });
-        return id;
     }
 
     /// The symbol with the given id.
@@ -1412,14 +1400,11 @@ pub const SymbolTracker = struct {
         try self.syncScopeMaps(scopes.list.len);
         try padTo(sc.ScopeId, &self.next_bodies, self.allocator, scopes.list.len, .none);
 
-        const allocator = self.allocator;
-        const sym_count = self.symbols.items.len;
-
-        // `decls.len` doubles as the write cursor during the fill
-        const decl_nodes = try allocator.alloc(ast.NodeIndex, self.decl_pairs.items.len);
+        // `len` doubles as the write cursor during each fill
+        const decl_nodes = try self.allocator.alloc(ast.NodeIndex, self.decl_pairs.items.len);
         for (self.symbols.items) |*s| s.decls = .{ .start = 0, .len = 0 };
         for (self.decl_pairs.items) |pair| {
-            self.symbols.items[@backingInt(pair.sid)].decls.len += 1;
+            self.symbols.items[@backingInt(pair.symbol)].decls.len += 1;
         }
         var decl_offset: u32 = 0;
         for (self.symbols.items) |*s| {
@@ -1430,17 +1415,17 @@ pub const SymbolTracker = struct {
         }
         std.debug.assert(decl_offset == self.decl_pairs.items.len);
         for (self.decl_pairs.items) |pair| {
-            const s = &self.symbols.items[@backingInt(pair.sid)];
+            const s = &self.symbols.items[@backingInt(pair.symbol)];
             decl_nodes[s.decls.start + s.decls.len] = pair.node;
             s.decls.len += 1;
         }
 
-        const node_symbols = try allocator.alloc(SymbolId, self.tree.nodes.len);
+        const node_symbols = try self.allocator.alloc(SymbolId, self.tree.nodes.len);
         @memset(node_symbols, .none);
         for (self.decl_pairs.items) |pair| {
-            node_symbols[@backingInt(pair.node)] = pair.sid;
+            node_symbols[@backingInt(pair.node)] = pair.symbol;
         }
-        const node_references = try allocator.alloc(ReferenceId, self.tree.nodes.len);
+        const node_references = try self.allocator.alloc(ReferenceId, self.tree.nodes.len);
         @memset(node_references, .none);
         for (self.references.items, 0..) |ref, i| {
             node_references[@backingInt(ref.node)] = @fromBackingInt(@intCast(i));
@@ -1451,7 +1436,7 @@ pub const SymbolTracker = struct {
         for (self.references.items) |*ref| {
             const name = self.tree.string(ref.name);
             const space = ref.flags.space;
-            const pctx = PrehashCtx{ .h = std.hash.Wyhash.hash(0, name) };
+            const prehashed = PrehashedContext{ .hash_value = std.hash.Wyhash.hash(0, name) };
             // the implicit arguments object (10.2.11 argumentsObjectNeeded) shadows outer bindings,
             // an own parameter or var still wins
             const arguments_barrier = (space == .value or space == .typeof) and
@@ -1460,8 +1445,7 @@ pub const SymbolTracker = struct {
                 var it = scopes.ancestors(ref.scope);
                 while (it.next()) |ancestor| {
                     const idx = @backingInt(ancestor);
-                    if (self.scope_maps.items[idx].getAdapted(name, pctx)) |id| {
-                        // a binding outside the reference's space does not shadow
+                    if (self.scope_maps.items[idx].getAdapted(name, prehashed)) |id| {
                         const sym = self.symbol(id);
                         if (sym.flags.visibleIn(space) and
                             visibleAt(self.tree, sym, ref, scopes, node_parents))
@@ -1480,9 +1464,8 @@ pub const SymbolTracker = struct {
             };
         }
 
-        // `len` doubles as the write cursor during the fill
-        const use_ranges = try allocator.alloc(Range, sym_count);
-        for (use_ranges) |*r| r.* = .{ .start = 0, .len = 0 };
+        const use_ranges = try self.allocator.alloc(Range, self.symbols.items.len);
+        @memset(use_ranges, .{ .start = 0, .len = 0 });
         for (self.references.items) |ref| {
             if (ref.symbol != .none) use_ranges[@backingInt(ref.symbol)].len += 1;
         }
@@ -1492,7 +1475,7 @@ pub const SymbolTracker = struct {
             use_offset += r.len;
             r.len = 0;
         }
-        const use_ids = try allocator.alloc(ReferenceId, use_offset);
+        const use_ids = try self.allocator.alloc(ReferenceId, use_offset);
         for (self.references.items, 0..) |ref, i| {
             if (ref.symbol == .none) continue;
             const r = &use_ranges[@backingInt(ref.symbol)];

@@ -1,5 +1,4 @@
-import { load } from "@yuku-core/wasm";
-import { parse, TokenKind } from "yuku-parser";
+import { parse, ready, TokenKind } from "yuku-parser";
 import { generate } from "yuku-codegen";
 import { analyze, BindingFlags } from "yuku-analyzer";
 import { CodeJar } from "https://esm.sh/codejar@4.2.0";
@@ -7,7 +6,7 @@ import hljs from "https://esm.sh/highlight.js@11.10.0/lib/core";
 import typescript from "https://esm.sh/highlight.js@11.10.0/lib/languages/typescript";
 
 hljs.registerLanguage("typescript", typescript);
-const core = await load();
+await ready;
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,14 +33,14 @@ const SAMPLE = [
   "",
 ].join("\n");
 
-function hl(text, lang) {
-  return hljs.highlight(text, { language: lang }).value;
+function highlightSyntax(text) {
+  return hljs.highlight(text, { language: "typescript" }).value;
 }
 
 const jar = CodeJar(
   codeView,
-  (el) => {
-    el.innerHTML = hl(el.textContent, "typescript");
+  (editor) => {
+    editor.innerHTML = highlightSyntax(editor.textContent);
     renderSquiggles();
   },
   { tab: "  ", spellcheck: false },
@@ -66,7 +65,7 @@ function leafSpan(value) {
   return el("span", "ast-null", "null");
 }
 
-function row(key, valueNode, keyClass = "ast-key") {
+function leafRow(key, valueNode, keyClass = "ast-key") {
   const r = el("div", "ast-row");
   if (key !== null) r.append(el("span", keyClass, `${key}: `));
   r.append(valueNode);
@@ -78,11 +77,15 @@ let astDetails = [];
 let semTargets = [];
 const openState = new Map();
 
-function branch(key, value, depth, path, keyClass = "ast-key") {
+function treeDetails(path, open) {
   const details = el("details");
   details.__path = path;
-  const stored = openState.get(path);
-  details.open = stored !== undefined ? stored : depth < OPEN_DEPTH;
+  details.open = openState.get(path) ?? open;
+  return details;
+}
+
+function branch(key, value, depth, path, keyClass = "ast-key") {
+  const details = treeDetails(path, depth < OPEN_DEPTH);
   astDetails.push(details);
   const summary = el("summary");
   if (key !== null) summary.append(el("span", keyClass, `${key}: `));
@@ -107,23 +110,23 @@ function branch(key, value, depth, path, keyClass = "ast-key") {
 
   details.append(summary);
   const body = el("div", "ast-body");
-  for (const [k, v] of entries) body.append(value_(k, v, depth + 1, `${path}/${k}`));
+  for (const [k, v] of entries) body.append(astValue(k, v, depth + 1, `${path}/${k}`));
   details.append(body);
   return details;
 }
 
-function value_(key, value, depth, path, keyClass = "ast-key") {
+function astValue(key, value, depth, path, keyClass = "ast-key") {
   if (Array.isArray(value)) {
     return value.length === 0
-      ? row(key, el("span", "ast-meta", "[]"), keyClass)
+      ? leafRow(key, el("span", "ast-meta", "[]"), keyClass)
       : branch(key, value, depth, path, keyClass);
   }
   if (value !== null && typeof value === "object") {
     return Object.keys(value).length === 0
-      ? row(key, el("span", "ast-meta", "{}"), keyClass)
+      ? leafRow(key, el("span", "ast-meta", "{}"), keyClass)
       : branch(key, value, depth, path, keyClass);
   }
-  return row(key, leafSpan(value), keyClass);
+  return leafRow(key, leafSpan(value), keyClass);
 }
 
 const FLAG_BADGES = [
@@ -181,13 +184,12 @@ function refBadges(ref) {
 }
 
 function symNode(name, badgeList, spans, sites, path) {
-  const details = el("details");
-  details.__path = path;
-  details.open = openState.get(path) ?? false;
+  const details = treeDetails(path, false);
   const summary = el("summary", "sem-sym");
   summary.append(el("span", "sem-name", name));
   for (const b of badgeList) summary.append(el("span", "sem-flag", b));
-  summary.append(el("span", "ast-meta", `${spans.refs.length} ref${spans.refs.length === 1 ? "" : "s"}`));
+  const refCount = spans.refs.length;
+  summary.append(el("span", "ast-meta", `${refCount} ref${refCount === 1 ? "" : "s"}`));
   summary.__spans = spans;
   summary.__focus = spans.decl[0] ?? spans.refs[0];
   details.append(summary);
@@ -208,9 +210,7 @@ function symSites(sym) {
 }
 
 function scopeNode(scope, kids, depth, path) {
-  const details = el("details");
-  details.__path = path;
-  details.open = openState.get(path) ?? depth < OPEN_DEPTH;
+  const details = treeDetails(path, depth < OPEN_DEPTH);
   const summary = el("summary");
   summary.append(el("span", "ast-type", scope.kind));
   if (scope.strict) summary.append(el("span", "sem-flag", "strict"));
@@ -226,15 +226,15 @@ function scopeNode(scope, kids, depth, path) {
   for (const sym of scope.bindings) {
     body.append(symNode(sym.name, badges(sym), spansOf(sym), symSites(sym), `${path}/s${sym.id}`));
   }
-  for (const child of kids[scope.id]) body.append(scopeNode(child, kids, depth + 1, `${path}/${child.id}`));
+  for (const child of kids[scope.id]) {
+    body.append(scopeNode(child, kids, depth + 1, `${path}/${child.id}`));
+  }
   details.append(body);
   return details;
 }
 
 function section(root, title, count, path) {
-  const details = el("details");
-  details.__path = path;
-  details.open = openState.get(path) ?? true;
+  const details = treeDetails(path, true);
   const summary = el("summary");
   summary.append(el("span", "ast-type", title));
   summary.append(el("span", "ast-meta", ` [${count}]`));
@@ -245,14 +245,18 @@ function section(root, title, count, path) {
   return body;
 }
 
-function recordRow(label, badgeList, specifier, spans, focus) {
+function recordRow(label, badgeList, record) {
+  const { start, end } = record.node;
+  const spans = record.local ? spansOf(record.local) : { decl: [[start, end]], refs: [] };
   const r = el("div", "sem-sym");
   r.append(el("span", "sem-name", label));
   for (const b of badgeList) r.append(el("span", "sem-flag", b));
-  if (specifier !== null) r.append(el("span", "ast-str", JSON.stringify(specifier)));
+  if (record.specifier !== null) {
+    r.append(el("span", "ast-str", JSON.stringify(record.specifier)));
+  }
   r.__spans = spans;
-  r.__focus = focus;
-  semTargets.push({ start: focus[0], end: focus[1], row: r, spans });
+  r.__focus = [start, end];
+  semTargets.push({ start, end, row: r, spans });
   return r;
 }
 
@@ -264,8 +268,7 @@ function importRow(imp) {
   if (imp.phase) badgeList.push(imp.phase);
   let label = imp.local ? imp.local.name : "(side effect)";
   if (imp.name && imp.local && imp.name !== imp.local.name) label += ` ← ${imp.name}`;
-  const spans = imp.local ? spansOf(imp.local) : { decl: [[imp.node.start, imp.node.end]], refs: [] };
-  return recordRow(label, badgeList, imp.specifier, spans, [imp.node.start, imp.node.end]);
+  return recordRow(label, badgeList, imp);
 }
 
 function exportRow(ex) {
@@ -277,8 +280,7 @@ function exportRow(ex) {
   let label = ex.name ?? (ex.kind === "equals" ? "export =" : "*");
   if (ex.globalName) label = `as namespace ${ex.globalName}`;
   if (ex.fromName && ex.fromName !== ex.name) label += ` ← ${ex.fromName}`;
-  const spans = ex.local ? spansOf(ex.local) : { decl: [[ex.node.start, ex.node.end]], refs: [] };
-  return recordRow(label, badgeList, ex.specifier, spans, [ex.node.start, ex.node.end]);
+  return recordRow(label, badgeList, ex);
 }
 
 const KIND_NAMES = new Map(Object.entries(TokenKind).map(([name, kind]) => [kind, name]));
@@ -348,7 +350,6 @@ function semTree(m) {
 
 function options() {
   return {
-    core,
     lang: $("lang").value,
     sourceType: $("sourceType").value,
     preserveParens: $("preserveParens").checked,
@@ -385,6 +386,16 @@ function relatedOf(d) {
   return (d.labels ?? []).filter((l) => l.start !== d.start || l.end !== d.end);
 }
 
+function countLevels(diags) {
+  const counts = { error: 0, warning: 0, info: 0 };
+  for (const d of diags) counts[levelOf(d)]++;
+  return counts;
+}
+
+function syncProblemsPanel() {
+  problemsPanel.hidden = !(problemsOpen && currentDiags.length > 0);
+}
+
 function setDiagnostics(diags, source) {
   currentDiags = diags;
   lineStarts = [0];
@@ -395,7 +406,7 @@ function setDiagnostics(diags, source) {
   hideDiagTip();
   renderSquiggles();
   renderProblems();
-  problemsPanel.hidden = !(problemsOpen && diags.length > 0);
+  syncProblemsPanel();
 }
 
 function clampSpan(start, end, textLen) {
@@ -409,7 +420,7 @@ function clampSpan(start, end, textLen) {
 function addSpan(diag, label, bucket, textLen, viewRect) {
   const src = label ?? diag;
   const [start, end] = clampSpan(src.start, src.end, textLen);
-  const range = rangeFromOffsets(codeView, start, end);
+  const range = rangeFromOffsets(start, end);
   if (!range) return;
   bucket.add(range);
   const rects = [];
@@ -463,13 +474,10 @@ function highlightDiag(d) {
   if (!srcHighlight) return;
   clearCodeHighlight();
   const textLen = codeView.textContent.length;
-  const add = (highlight, start, end) => {
-    const [s, e] = clampSpan(start, end, textLen);
-    const range = rangeFromOffsets(codeView, s, e);
-    if (range) highlight.add(range);
-  };
-  add(srcHighlight, d.start, d.end);
-  for (const label of relatedOf(d)) add(refHighlight, label.start, label.end);
+  addRange(srcHighlight, ...clampSpan(d.start, d.end, textLen));
+  for (const label of relatedOf(d)) {
+    addRange(refHighlight, ...clampSpan(label.start, label.end, textLen));
+  }
 }
 
 function relatedRow(label, className) {
@@ -539,8 +547,7 @@ function problemGroup(d, index) {
 }
 
 function renderProblems() {
-  const counts = { error: 0, warning: 0, info: 0 };
-  for (const d of currentDiags) counts[levelOf(d)]++;
+  const counts = countLevels(currentDiags);
   problemsCounts.replaceChildren(
     ...LEVELS.filter((level) => counts[level]).map((level) => {
       const chip = el("span", `count sev-${level}`);
@@ -564,12 +571,10 @@ function gotoProblem(delta) {
 }
 
 function diagStatusText(diags, times) {
-  const counts = { error: 0, warning: 0, info: 0 };
-  for (const d of diags) counts[levelOf(d)]++;
-  const parts = [];
-  if (counts.error) parts.push(`${DIAG_ICON.error} ${counts.error}`);
-  if (counts.warning) parts.push(`${DIAG_ICON.warning} ${counts.warning}`);
-  if (counts.info) parts.push(`${DIAG_ICON.info} ${counts.info}`);
+  const counts = countLevels(diags);
+  const parts = LEVELS.filter((level) => counts[level]).map(
+    (level) => `${DIAG_ICON[level]} ${counts[level]}`,
+  );
   const kind = counts.error ? "err" : counts.warning ? "warn" : "";
   return [`${parts.join("  ")} · ${times}`, kind];
 }
@@ -595,14 +600,14 @@ function regionsAt(clientX, clientY) {
 
 function tipSection(d, focusLabel) {
   const level = levelOf(d);
-  const section = el("div", `tip-item sev-${level}`);
+  const item = el("div", `tip-item sev-${level}`);
 
   const head = el("div", "tip-head");
   head.append(el("span", "problem-icon", DIAG_ICON[level]));
   head.append(el("span", "tip-level", level));
   head.append(el("span", "problem-pos", problemPos(d.start)));
-  section.append(head);
-  section.append(el("div", "tip-msg", d.message));
+  item.append(head);
+  item.append(el("div", "tip-msg", d.message));
 
   const related = relatedOf(d);
   if (related.length) {
@@ -616,10 +621,10 @@ function tipSection(d, focusLabel) {
       }
       list.append(row);
     }
-    section.append(list);
+    item.append(list);
   }
-  if (d.help) section.append(helpRow(d.help, "tip-help"));
-  return section;
+  if (d.help) item.append(helpRow(d.help, "tip-help"));
+  return item;
 }
 
 let tipKey = null;
@@ -688,7 +693,6 @@ function render() {
   astNodes = [];
   astDetails = [];
   semTargets = [];
-  focused = null;
   lastHit = null;
   semHit = null;
   activeSpans = null;
@@ -723,12 +727,14 @@ function render() {
     }
   } else if (view === "tokens") {
     astView.replaceChildren(
-      result.tokens ? tokenList(result.tokens) : el("div", "sem-err", "this yuku-parser has no tokens"),
+      result.tokens
+        ? tokenList(result.tokens)
+        : el("div", "sem-err", "this yuku-parser has no tokens"),
     );
   } else {
     astView.replaceChildren(
-      value_(null, result.program, 0, ""),
-      value_("comments", result.comments, 0, "comments", "ast-type"),
+      astValue(null, result.program, 0, ""),
+      astValue("comments", result.comments, 0, "comments", "ast-type"),
     );
   }
   astView.scrollTop = astScroll;
@@ -744,7 +750,7 @@ function render() {
       comments: $("comments").value,
       indent: +$("indent").value,
     });
-    outView.innerHTML = hl(out.code, "typescript");
+    outView.innerHTML = highlightSyntax(out.code);
   } catch (e) {
     outView.textContent = String(e);
   }
@@ -764,32 +770,32 @@ function render() {
 }
 
 const HAS_HL = typeof Highlight !== "undefined" && typeof CSS !== "undefined" && !!CSS.highlights;
-const srcHighlight = HAS_HL ? new Highlight() : null;
-if (srcHighlight) CSS.highlights.set("yuku-src", srcHighlight);
-const refHighlight = HAS_HL ? new Highlight() : null;
-if (refHighlight) CSS.highlights.set("yuku-ref", refHighlight);
-const declHighlight = HAS_HL ? new Highlight() : null;
-if (declHighlight) CSS.highlights.set("yuku-decl", declHighlight);
+
+function registerHighlight(name) {
+  const highlight = new Highlight();
+  CSS.highlights.set(name, highlight);
+  return highlight;
+}
+
+const srcHighlight = HAS_HL ? registerHighlight("yuku-src") : null;
+const refHighlight = HAS_HL ? registerHighlight("yuku-ref") : null;
+const declHighlight = HAS_HL ? registerHighlight("yuku-decl") : null;
 const diagHighlights = HAS_HL ? {} : null;
 const labelHighlights = HAS_HL ? {} : null;
-if (diagHighlights) {
+if (HAS_HL) {
   for (const level of LEVELS) {
-    const primary = new Highlight();
-    CSS.highlights.set(`yuku-diag-${level}`, primary);
-    diagHighlights[level] = primary;
-    const label = new Highlight();
-    CSS.highlights.set(`yuku-label-${level}`, label);
-    labelHighlights[level] = label;
+    diagHighlights[level] = registerHighlight(`yuku-diag-${level}`);
+    labelHighlights[level] = registerHighlight(`yuku-label-${level}`);
   }
 }
 
 let suppressCaret = false;
 
-function rangeFromOffsets(parent, start, end) {
-  const walker = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
+function rangeFromOffsets(start, end) {
+  const walker = document.createTreeWalker(codeView, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
-  range.setStart(parent, 0);
-  range.setEnd(parent, 0);
+  range.setStart(codeView, 0);
+  range.setEnd(codeView, 0);
   let pos = 0;
   let startSet = false;
   let node;
@@ -820,30 +826,28 @@ function caretOffset() {
   return pre.toString().length;
 }
 
+function addRange(highlight, start, end) {
+  const range = rangeFromOffsets(start, end);
+  if (range) highlight.add(range);
+}
+
 function highlightCode(start, end) {
   if (!srcHighlight) return;
   clearCodeHighlight();
-  const range = rangeFromOffsets(codeView, start, end);
-  if (range) srcHighlight.add(range);
+  addRange(srcHighlight, start, end);
 }
 
 function clearCodeHighlight() {
-  if (srcHighlight) srcHighlight.clear();
-  if (refHighlight) refHighlight.clear();
-  if (declHighlight) declHighlight.clear();
+  srcHighlight?.clear();
+  refHighlight?.clear();
+  declHighlight?.clear();
 }
 
 function highlightSpans({ decl, refs }) {
   if (!srcHighlight) return;
   clearCodeHighlight();
-  for (const [s, e] of decl) {
-    const r = rangeFromOffsets(codeView, s, e);
-    if (r) declHighlight.add(r);
-  }
-  for (const [s, e] of refs) {
-    const r = rangeFromOffsets(codeView, s, e);
-    if (r) refHighlight.add(r);
-  }
+  for (const [start, end] of decl) addRange(declHighlight, start, end);
+  for (const [start, end] of refs) addRange(refHighlight, start, end);
 }
 
 let activeSpans = null;
@@ -854,7 +858,7 @@ function restoreActive() {
 }
 
 function selectCode(start, end) {
-  const range = rangeFromOffsets(codeView, start, end);
+  const range = rangeFromOffsets(start, end);
   if (!range) return;
   const sel = window.getSelection();
   suppressCaret = true;
@@ -867,7 +871,7 @@ function selectCode(start, end) {
 }
 
 function scrollCodeIntoView(start, end) {
-  const range = rangeFromOffsets(codeView, start, end);
+  const range = rangeFromOffsets(start, end);
   if (!range) return;
   const rect = range.getBoundingClientRect();
   const view = codeView.getBoundingClientRect();
@@ -879,13 +883,11 @@ function scrollCodeIntoView(start, end) {
   }
 }
 
-function focusCode(start, end, scroll) {
-  if (srcHighlight) highlightCode(start, end);
-  else if (scroll) selectCode(start, end);
-  if (scroll) scrollCodeIntoView(start, end);
+function revealCode(start, end) {
+  if (!srcHighlight) selectCode(start, end);
+  scrollCodeIntoView(start, end);
 }
 
-let focused = null;
 let lastHit = null;
 
 function setOpen(details, open) {
@@ -908,41 +910,34 @@ function isolate(target) {
 }
 
 function removeHit() {
-  if (lastHit) {
-    lastHit.classList.remove("ast-hit");
-    lastHit = null;
-  }
-  focused = null;
+  lastHit?.classList.remove("ast-hit");
+  lastHit = null;
 }
 
 function focusNode(summary, scroll, collapseRest) {
   const details = summary.parentElement;
   if (lastHit !== details) {
-    if (lastHit) lastHit.classList.remove("ast-hit");
+    removeHit();
     lastHit = details;
     details.classList.add("ast-hit");
   }
-  focused = summary;
   if (collapseRest) isolate(details);
   else reveal(details);
   if (scroll) summary.scrollIntoView({ block: "nearest" });
 }
 
-function nodeAt(offset) {
+function innermostAt(targets, offset) {
   let best = null;
-  for (const n of astNodes) {
-    if (offset >= n.start && offset <= n.end) {
-      if (!best || n.end - n.start <= best.end - best.start) best = n;
+  for (const t of targets) {
+    if (offset >= t.start && offset <= t.end) {
+      if (!best || t.end - t.start <= best.end - best.start) best = t;
     }
   }
   return best;
 }
 
-function mapCaretToAst(scroll, collapseRest) {
-  if (suppressCaret) return;
-  const offset = caretOffset();
-  if (offset == null) return;
-  const hit = nodeAt(offset);
+function mapCaretToAst(offset, scroll, collapseRest) {
+  const hit = innermostAt(astNodes, offset);
   if (hit) focusNode(hit.summary, scroll, collapseRest);
   else removeHit();
 }
@@ -951,33 +946,18 @@ let semHit = null;
 
 function markSem(row) {
   if (semHit === row) return;
-  if (semHit) semHit.classList.remove("sem-current");
+  clearSem();
   semHit = row;
   row.classList.add("sem-current");
 }
 
 function clearSem() {
-  if (semHit) {
-    semHit.classList.remove("sem-current");
-    semHit = null;
-  }
+  semHit?.classList.remove("sem-current");
+  semHit = null;
 }
 
-function semTargetAt(offset) {
-  let best = null;
-  for (const t of semTargets) {
-    if (offset >= t.start && offset <= t.end) {
-      if (!best || t.end - t.start <= best.end - best.start) best = t;
-    }
-  }
-  return best;
-}
-
-function mapCaretToSem(scroll) {
-  if (suppressCaret) return;
-  const offset = caretOffset();
-  if (offset == null) return;
-  const hit = semTargetAt(offset);
+function mapCaretToSem(offset, scroll) {
+  const hit = innermostAt(semTargets, offset);
   if (!hit) {
     activeSpans = null;
     clearCodeHighlight();
@@ -992,8 +972,11 @@ function mapCaretToSem(scroll) {
 }
 
 function mapCaret(scroll, collapseRest) {
-  if ($("view").value === "ast") mapCaretToAst(scroll, collapseRest);
-  else mapCaretToSem(scroll);
+  if (suppressCaret) return;
+  const offset = caretOffset();
+  if (offset == null) return;
+  if ($("view").value === "ast") mapCaretToAst(offset, scroll, collapseRest);
+  else mapCaretToSem(offset, scroll);
 }
 
 let caretFrame;
@@ -1063,20 +1046,33 @@ astView.addEventListener("click", (e) => {
   if (sym && sym.__spans) {
     activeSpans = sym.__spans;
     markSem(sym);
-    if (srcHighlight) highlightSpans(activeSpans);
-    if (sym.__focus) {
-      if (!srcHighlight) selectCode(sym.__focus[0], sym.__focus[1]);
-      scrollCodeIntoView(sym.__focus[0], sym.__focus[1]);
-    }
+    highlightSpans(activeSpans);
+    if (sym.__focus) revealCode(...sym.__focus);
     return;
   }
   const summary = e.target.closest("summary");
   if (!summary || summary.dataset.start === undefined) return;
-  focusCode(+summary.dataset.start, +summary.dataset.end, true);
+  const start = +summary.dataset.start;
+  const end = +summary.dataset.end;
+  highlightCode(start, end);
+  revealCode(start, end);
 });
 
 const STATE_KEY = "yuku-state";
-const CONTROLS = ["lang", "sourceType", "preserveParens", "semanticErrors", "attachComments", "strip", "minify", "format", "quotes", "comments", "indent", "view"];
+const CONTROLS = [
+  "lang",
+  "sourceType",
+  "preserveParens",
+  "semanticErrors",
+  "attachComments",
+  "strip",
+  "minify",
+  "format",
+  "quotes",
+  "comments",
+  "indent",
+  "view",
+];
 
 function snapshot() {
   const s = {
@@ -1156,11 +1152,11 @@ function applyState(s) {
 }
 
 async function showVersion() {
-  const el = $("version");
+  const label = $("version");
   const pr = new URLSearchParams(location.search).get("pr");
   if (pr) {
-    el.textContent = `pr ${pr.slice(0, 7)}`;
-    el.title = `preview packages of yuku-toolchain/yuku@${pr}`;
+    label.textContent = `pr ${pr.slice(0, 7)}`;
+    label.title = `preview packages of yuku-toolchain/yuku@${pr}`;
     return;
   }
   try {
@@ -1168,38 +1164,37 @@ async function showVersion() {
     const res = await fetch(url);
     const match = res.headers.get("x-esm-path")?.match(/@(\d[^/]*)/);
     if (match) {
-      el.textContent = match[1];
+      label.textContent = match[1];
       return;
     }
     const { version } = await (await fetch(new URL("./package.json", url))).json();
-    if (version) el.textContent = version;
+    if (version) label.textContent = version;
   } catch {}
 }
 
 showVersion();
 
-const themeBtn = $("theme");
+const themeButton = $("theme");
 function labelTheme() {
-  themeBtn.textContent = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  themeButton.textContent = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
 }
-themeBtn.addEventListener("click", () => {
+themeButton.addEventListener("click", () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
   localStorage.setItem("yuku-theme", next);
   labelTheme();
   persist();
 });
-labelTheme();
 
 status.addEventListener("click", () => {
   problemsOpen = !problemsOpen;
-  problemsPanel.hidden = !(problemsOpen && currentDiags.length > 0);
+  syncProblemsPanel();
   persist();
 });
 
 $("problemsClose").addEventListener("click", () => {
   problemsOpen = false;
-  problemsPanel.hidden = true;
+  syncProblemsPanel();
   persist();
 });
 
@@ -1215,12 +1210,13 @@ $("minify").addEventListener("change", (e) => {
   $("quotes").value = e.target.checked ? "shortest" : "preserve";
 });
 
-for (const control of document.querySelectorAll("header select, header input, .pane-head select, .pane-head input")) {
+const CONTROL_SELECTOR = "header select, header input, .pane-head select, .pane-head input";
+for (const control of document.querySelectorAll(CONTROL_SELECTOR)) {
   control.addEventListener("change", render);
 }
 
 const initial = loadState();
 applyState(initial);
 labelTheme();
-jar.updateCode(initial && typeof initial.code === "string" ? initial.code : SAMPLE);
+jar.updateCode(typeof initial?.code === "string" ? initial.code : SAMPLE);
 render();

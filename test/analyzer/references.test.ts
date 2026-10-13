@@ -155,8 +155,9 @@ describe("declaration spaces", () => {
   });
 
   test("a dotted type name starts from a namespace, not a shadowing value", () => {
-    expect(summary(`namespace N { export type T = number; } function f() { const N = 1; let x: N.T; }`))
-      .toMatchInlineSnapshot(`
+    const source =
+      `namespace N { export type T = number; } function f() { const N = 1; let x: N.T; }`;
+    expect(summary(source)).toMatchInlineSnapshot(`
         "global
           module [strict]
             N#0  namespace
@@ -283,7 +284,6 @@ describe("JSX", () => {
   });
 
   test("a lowercase member root resolves while a direct lowercase tag stays intrinsic", () => {
-    // member roots are expressions while direct lowercase tags are intrinsic
     expect(
       summary(`const motion = {}; const App = () => <><motion.div /><div /></>;`, {
         path: "input.jsx",

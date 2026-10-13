@@ -59,39 +59,27 @@ const OrderVisitor = struct {
         return .proceed;
     }
 
-    pub fn exit_node(
-        self: *OrderVisitor,
-        data: ast.NodeData,
-        index: ast.NodeIndex,
-        ctx: *Ctx,
-    ) void {
-        _ = data;
-        _ = index;
-        _ = ctx;
+    pub fn exit_node(self: *OrderVisitor, _: ast.NodeData, _: ast.NodeIndex, _: *Ctx) void {
         _ = self.frames.pop();
     }
 };
 
-const OrderChecker = struct {
-    gpa: Allocator,
+fn checkOrder(path: []const u8, tree: *const ast.Tree) !void {
+    const gpa = std.testing.allocator;
+    var visitor: OrderVisitor = .{ .gpa = gpa };
+    defer visitor.frames.deinit(gpa);
+    var ctx: Ctx = .{ .tree = tree };
+    try traverser.walk(Ctx, OrderVisitor, &visitor, &ctx);
 
-    pub fn check(self: OrderChecker, path: []const u8, tree: *const ast.Tree) !void {
-        var visitor: OrderVisitor = .{ .gpa = self.gpa };
-        defer visitor.frames.deinit(self.gpa);
-        var ctx: Ctx = .{ .tree = tree };
-        try traverser.walk(Ctx, OrderVisitor, &visitor, &ctx);
-
-        if (visitor.violation) |v| {
-            std.debug.print(
-                "{s}: {t} at offset {d} entered after a sibling at {d} inside {t}\n",
-                .{ path, v.child, v.start, v.prev, v.parent },
-            );
-            return error.ChildrenOutOfOrder;
-        }
+    if (visitor.violation) |v| {
+        std.debug.print(
+            "{s}: {t} at offset {d} entered after a sibling at {d} inside {t}\n",
+            .{ path, v.child, v.start, v.prev, v.parent },
+        );
+        return error.ChildrenOutOfOrder;
     }
-};
+}
 
 test "walker enters children in source order across the parser corpus" {
-    const gpa = std.testing.allocator;
-    try helpers.forEachCorpusTree(gpa, OrderChecker{ .gpa = gpa });
+    try helpers.forEachCorpusTree(checkOrder);
 }

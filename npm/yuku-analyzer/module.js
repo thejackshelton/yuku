@@ -1,8 +1,8 @@
 import { CHILD_KEYS, findAll, WalkContext, _walk, _walkAsync } from "yuku-ast";
-import { fileOptions } from "yuku-core";
+import { run } from "yuku-parser/wasm";
 import { BindingFlags, decode } from "./decode.js";
 
-const _dec = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 class Scope {
   #sem;
@@ -256,15 +256,11 @@ export class Module {
   _deps = [];
   _dependents = [];
 
-  constructor(analyzer, core, path, source, options = {}) {
+  constructor(analyzer, path, source, options) {
     this.analyzer = analyzer;
     this.path = path;
-    this.source = typeof source === "string" ? source : _dec.decode(source);
-    this.#r = decode(
-      core.analyze(this.source, fileOptions({ ...options, path })),
-      this.source,
-      path,
-    );
+    this.source = typeof source === "string" ? source : utf8.decode(source);
+    this.#r = decode(run("analyze", this.source, { ...options, path }), this.source, path);
     this.#sem = this.#r.semantic;
   }
 
@@ -385,8 +381,8 @@ export class Module {
       throw new TypeError("capturesOf: node does not belong to this module's AST");
     }
     const { scope, symbol, reference } = this.#sem;
-    const fnScope = this.#sem.nodeScope(index);
-    if (scope.kind(fnScope) !== "function" || scope.nodeIndex(fnScope) !== index) {
+    const functionScope = this.#sem.nodeScope(index);
+    if (scope.kind(functionScope) !== "function" || scope.nodeIndex(functionScope) !== index) {
       throw new TypeError("capturesOf: node does not create a function scope");
     }
     const start = this.#r.startOf(index);
@@ -397,8 +393,8 @@ export class Module {
       if (target === null || reference.inTypePosition(i)) continue;
       if (reference.start(i) < start || reference.end(i) > end) continue;
       let inside = false;
-      for (let s = symbol.scopeId(target); s !== null; s = scope.parentId(s)) {
-        if (s === fnScope) {
+      for (let id = symbol.scopeId(target); id !== null; id = scope.parentId(id)) {
+        if (id === functionScope) {
           inside = true;
           break;
         }
@@ -520,9 +516,9 @@ export class Module {
     if (this.#declarations === null) {
       const map = new Map();
       const { symbol } = this.#sem;
-      for (let s = 0; s < symbol.count; s++) {
-        const count = symbol.declCount(s);
-        for (let i = 0; i < count; i++) map.set(symbol.declNodeIndex(s, i), s);
+      for (let id = 0; id < symbol.count; id++) {
+        const count = symbol.declCount(id);
+        for (let i = 0; i < count; i++) map.set(symbol.declNodeIndex(id, i), id);
       }
       this.#declarations = map;
     }
