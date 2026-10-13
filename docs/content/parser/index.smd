@@ -17,14 +17,6 @@ const { program, comments, diagnostics } = parse("const x = 1 + 2;");
 
 `parse` takes a string or UTF-8 bytes, and `program` is an [ESTree / TypeScript-ESTree AST](/parser/ast/#javascript).
 
-A browser compiles the WebAssembly after import, so await `ready` before the first parse. Other runtimes are ready on import.
-
-```js
-import { parse, ready } from "yuku";
-
-await ready;
-```
-
 ### [Options]($section.id('js-options'))
 
 ```js

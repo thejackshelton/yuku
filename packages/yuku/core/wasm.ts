@@ -1,4 +1,4 @@
-import { ready as loaded, yuku } from "#module";
+import { yuku } from "#module";
 import type { ParseResult } from "../parser";
 import type { SourceLang, SourceType } from "../types";
 import { addChildKeys } from "./child-keys";
@@ -35,12 +35,6 @@ interface Exports {
   analyze(pointer: number, len: number, flags: number): number;
   dialect(): number;
 }
-
-/**
- * Resolves once the WebAssembly is compiled. A browser compiles it after import, so it awaits
- * `ready` before the first parse. Node.js, Bun, Deno, and Workers compile it on import.
- */
-export const ready: Promise<void> = loaded;
 
 const LANGS: Record<string, number> = { js: 0, ts: 1, jsx: 2, tsx: 3, dts: 4 };
 const SOURCE_TYPES: Record<string, number> = { script: 0, module: 1, commonjs: 2 };
@@ -79,9 +73,6 @@ export function run(
   options: RunOptions,
 ): ParseResult | Decoded {
   const module = options.wasm ?? yuku;
-  if (module === null) {
-    throw new Error("yuku: the WebAssembly has not loaded, `await ready` before parsing");
-  }
   let exports = instances.get(module);
   if (
     exports === undefined ||

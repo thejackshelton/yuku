@@ -31,8 +31,6 @@ project.setFile("c.ts", `import { renamed } from "./b.ts"; renamed;`);
 project.module("c.ts").rootScope.find("renamed").definition().binding.name; // "value"
 ```
 
-In a browser, await `ready` from `yuku` or `yuku/analyzer` before the first analysis.
-
 ### [Analyzer]($section.id('js-analyzer'))
 
 ```js

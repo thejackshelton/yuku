@@ -17,9 +17,7 @@ Yuku is a JavaScript and TypeScript compiler toolchain written in Zig, for use f
 
 **Fast.** Built for speed, see [Performance](#performance).
 
-**Small.** One 1.1 MB package on npm, see [Size](#size).
-
-**Anywhere.** Runs in Node.js, Bun, Deno, browsers, and edge runtimes, see [JavaScript](#javascript).
+**Anywhere.** Runs in Node.js, Bun, Deno, Workers, and browsers, see [JavaScript](#javascript).
 
 **Zero dependencies.** Pure Zig, with no dependencies in the build or on npm.
 
@@ -46,14 +44,7 @@ npm install yuku
 | [`yuku/codegen`](https://yuku.fyi/parser/codegen/#javascript)   | Print an AST back to source, with source maps     |
 | [`yuku/types`](https://yuku.fyi/parser/ast/#javascript)         | TypeScript types for the AST                      |
 
-It runs in Node.js 18 or newer, Bun, Deno, Workers, and browsers with WebAssembly SIMD. A browser compiles the WebAssembly after import, so await `ready` before the first parse.
-
-```js
-import { parse, ready } from "yuku";
-
-await ready;
-parse("const x = 1;");
-```
+It runs in Node.js 18 or newer, Bun, Deno, Workers, and browsers with WebAssembly SIMD.
 
 ### Zig
 
@@ -97,16 +88,6 @@ The lead holds on a single large file.
 
 ![Analyzing `typescript.js` (7.8 MB) on npm · [benchmark](https://github.com/yuku-toolchain/ecmascript-analyzer-benchmark-js)](https://raw.githubusercontent.com/yuku-toolchain/ecmascript-analyzer-benchmark-js/refs/heads/main/charts/typescript_js.png "npm benchmark comparing Yuku, TypeScript, and typescript-eslint analyzing typescript.js")
 
-## Size
-
-Installed with npm, `yuku` is **1.1 MB** with no dependencies, and covers every task below. The alternatives, installed with their dependencies:
-
-| To                            | Others                                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------------------------- |
-| Parse                         | `oxc-parser` 4.7 MB, `@babel/parser` 4.8 MB, `@typescript-eslint/typescript-estree` 26.3 MB |
-| Analyze scopes and references | `@typescript-eslint/typescript-estree` + `@typescript-eslint/scope-manager` 26.7 MB         |
-| Print an AST                  | `astring` 270 kB, `@babel/generator` 2.5 MB                                                 |
-
 # Parser
 
 Source: https://yuku.fyi/parser/
@@ -122,14 +103,6 @@ const { program, comments, diagnostics } = parse("const x = 1 + 2;");
 ```
 
 `parse` takes a string or UTF-8 bytes, and `program` is an [ESTree / TypeScript-ESTree AST](https://yuku.fyi/parser/ast/#javascript).
-
-A browser compiles the WebAssembly after import, so await `ready` before the first parse. Other runtimes are ready on import.
-
-```js
-import { parse, ready } from "yuku";
-
-await ready;
-```
 
 ### Options
 
@@ -600,8 +573,6 @@ project.setFile("c.ts", `import { renamed } from "./b.ts"; renamed;`);
 
 project.module("c.ts").rootScope.find("renamed").definition().binding.name; // "value"
 ```
-
-In a browser, await `ready` from `yuku` or `yuku/analyzer` before the first analysis.
 
 ### Analyzer
 

@@ -1,9 +1,8 @@
+import { BindingFlags as bindingFlags } from "../core/decode";
 import type { FileOptions } from "../types";
 import { Analyzer, type AnalyzerOptions, type ParseOptions } from "./analyzer";
-import { BindingFlags as bindingFlags } from "../core/decode";
 import type { BindingFlagMap, Module } from "./module";
 
-export { ready } from "../core/wasm";
 export { Analyzer };
 export type { AnalyzerOptions, SetFileOptions } from "./analyzer";
 export type {

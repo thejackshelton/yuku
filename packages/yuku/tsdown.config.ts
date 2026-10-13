@@ -7,8 +7,7 @@ export default defineConfig({
     ast: "ast/index.ts",
     codegen: "codegen/index.ts",
     types: "types/index.ts",
-    "module/browser": "core/module/browser.ts",
-    "module/node": "core/module/node.ts",
+    "module/inline": "core/module/inline.ts",
     "module/workerd": "core/module/workerd.ts",
   },
   outDir: "dist",
@@ -19,6 +18,7 @@ export default defineConfig({
   hash: false,
   treeshake: true,
   copy: [{ from: "core/yuku.wasm", to: "dist" }],
-  deps: { neverBundle: [/^#/, "node:fs"] },
+  loader: { ".wasm": "binary" },
+  deps: { neverBundle: [/^#/] },
   outputOptions: { chunkFileNames: "shared/[name].js" },
 });

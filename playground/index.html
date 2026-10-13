@@ -25,7 +25,7 @@
             : `https://esm.sh/yuku${subpath}`;
       }
 
-      const scopes = local ? { "/pkg/": { "#module": "/pkg/dist/module/browser.js" } } : {};
+      const scopes = local ? { "/pkg/": { "#module": "/pkg/dist/module/inline.js" } } : {};
       document.write(`<script type="importmap">${JSON.stringify({ imports, scopes })}<\/script>`);
     </script>
   </head>

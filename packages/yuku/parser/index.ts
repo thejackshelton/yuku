@@ -11,7 +11,7 @@ import type {
 } from "../types";
 
 export type * from "../types";
-export { langFromPath, ready, sourceTypeFromPath } from "../core/wasm";
+export { langFromPath, sourceTypeFromPath } from "../core/wasm";
 
 export interface ParseOptions extends FileOptions {
   /**

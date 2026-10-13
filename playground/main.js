@@ -1,4 +1,4 @@
-import { parse, ready, TokenKind } from "yuku";
+import { parse, TokenKind } from "yuku";
 import { generate } from "yuku/codegen";
 import { analyze, BindingFlags } from "yuku/analyzer";
 import { CodeJar } from "https://esm.sh/codejar@4.2.0";
@@ -6,7 +6,6 @@ import hljs from "https://esm.sh/highlight.js@11.10.0/lib/core";
 import typescript from "https://esm.sh/highlight.js@11.10.0/lib/languages/typescript";
 
 hljs.registerLanguage("typescript", typescript);
-await ready;
 
 const $ = (id) => document.getElementById(id);
 
