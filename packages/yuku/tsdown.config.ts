@@ -18,7 +18,7 @@ export default defineConfig({
   hash: false,
   treeshake: true,
   copy: [{ from: "core/yuku.wasm", to: "dist" }],
-  loader: { ".wasm": "binary" },
+  loader: { ".wasm": "base64" },
   deps: { neverBundle: [/^#/] },
   outputOptions: {
     chunkFileNames: "shared/[name].js",

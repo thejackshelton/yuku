@@ -3,6 +3,7 @@ import type { ParseResult } from "../parser";
 import type { SourceLang, SourceType } from "../types";
 import { addChildKeys } from "./child-keys";
 import { decode, type Decoded } from "./decode";
+import { NodeBuffer } from "./node";
 
 export interface RunOptions {
   path?: string;
@@ -86,8 +87,7 @@ export function run(
   const { memory, alloc, free } = exports;
   const capacity = source.length * 3 || 1;
   const pointer = alloc(capacity);
-  const view = new Uint8Array(memory.buffer, pointer, capacity);
-  const written = encoder.encodeInto(source, view).written;
+  const written = writeSource(memory.buffer, pointer, capacity, source);
   const result = exports[entry](pointer, written, flagsOf(options, dialect));
   free(pointer, capacity);
   if (result === 0) throw new Error("yuku: out of memory");
@@ -95,6 +95,18 @@ export function run(
   const buffer = memory.buffer.slice(result + 4, result + 4 + size);
   free(result, 4 + size);
   return decode(buffer, source, options.path || null, dialect?.shapes ?? null);
+}
+
+function writeSource(
+  memory: ArrayBuffer,
+  pointer: number,
+  capacity: number,
+  source: string,
+): number {
+  // WebContainers' encodeInto repeats its last count for an empty string
+  if (source.length === 0) return 0;
+  if (NodeBuffer !== undefined) return NodeBuffer.from(memory, pointer, capacity).write(source);
+  return encoder.encodeInto(source, new Uint8Array(memory, pointer, capacity)).written;
 }
 
 function dialectOf(module: WebAssembly.Module, exports: Exports): Dialect | null {

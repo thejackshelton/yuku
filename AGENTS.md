@@ -248,7 +248,7 @@ How this repository works. The runtime it ships to, where its tests go, how a ch
 ### Runtime Baseline
 
 - Shipped JavaScript runs on **one floor**: ECMAScript 2020, on the runtime version in the root `package.json` `engines.node`. Tools downstream support older runtimes than we might, and a newer syntax or built-in breaks them silently. The package declares that same floor, and CI runs it on exactly that version.
-- The package runs Yuku as baseline WebAssembly, with no post-MVP features, so any runtime with WebAssembly runs it. Enabling a feature raises the floor.
+- The package runs Yuku as WebAssembly with SIMD and no other post-MVP feature, so the floor is the first runtime with WebAssembly SIMD. Enabling another feature raises the floor.
 - **Raising the floor is a breaking change.** Change the root `engines.node` on purpose, let the package follow it, and say so in the release notes. Never raise it implicitly by reaching for a newer feature.
 
 ### Testing

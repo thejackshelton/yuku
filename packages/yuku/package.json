@@ -50,7 +50,7 @@
     "build": "tsdown"
   },
   "engines": {
-    "node": ">=14.18.0"
+    "node": ">=16.4.0"
   },
   "keywords": [
     "analyzer",

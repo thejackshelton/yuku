@@ -135,8 +135,9 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
         .cpu_model = .{ .explicit = &std.Target.wasm.cpu.mvp },
+        .cpu_features_add = std.Target.wasm.featureSet(&.{.simd128}),
     });
-    // small saves 85 kB at the cost of 10 to 15% of the speed
+
     const wasm_optimize: std.lang.Optimize = .fast;
     const wasm_util = b.createModule(.{
         .root_source_file = b.path("src/util/root.zig"),

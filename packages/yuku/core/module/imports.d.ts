@@ -8,6 +8,6 @@ declare module "#wasm" {
 }
 
 declare module "*.wasm" {
-  const bytes: Uint8Array<ArrayBuffer>;
-  export default bytes;
+  const base64: string;
+  export default base64;
 }
