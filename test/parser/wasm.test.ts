@@ -19,6 +19,46 @@ test("the JavaScript base64 decoder matches Buffer", () => {
   expect(Buffer.from(decodeBase64(shipped.toString("base64")))).toEqual(shipped);
 });
 
+test("grown memory is released once it stops growing for ten seconds", () => {
+  const wasm = new WebAssembly.Module(shipped);
+  const Instance = WebAssembly.Instance;
+  const now = Date.now;
+  const made: WebAssembly.Instance[] = [];
+  let clock = now();
+  WebAssembly.Instance = function (module: WebAssembly.Module) {
+    const instance = new Instance(module);
+    made.push(instance);
+    return instance;
+  } as unknown as typeof WebAssembly.Instance;
+  Date.now = () => clock;
+  const bytesOf = (instance: WebAssembly.Instance) =>
+    (instance.exports.memory as WebAssembly.Memory).buffer.byteLength;
+  const large = "a = b + c;\n".repeat(100_000);
+  try {
+    expect(parse(large, { wasm }).program.body).toHaveLength(100_000);
+    expect(made).toHaveLength(1);
+    expect(bytesOf(made[0]!)).toBeGreaterThan(128 * 1024 * 1024);
+
+    for (let round = 0; round < 3; round++) {
+      expect(parse("a;", { wasm }).program.body).toHaveLength(1);
+      expect(parse(large, { wasm }).program.body).toHaveLength(100_000);
+    }
+    expect(made).toHaveLength(1);
+
+    clock += 10_000;
+    expect(parse("a;", { wasm }).program.body).toHaveLength(1);
+    expect(made).toHaveLength(1);
+
+    clock += 1;
+    expect(parse("a;", { wasm }).program.body).toHaveLength(1);
+    expect(made).toHaveLength(2);
+    expect(bytesOf(made[1]!)).toBeLessThan(128 * 1024 * 1024);
+  } finally {
+    WebAssembly.Instance = Instance;
+    Date.now = now;
+  }
+});
+
 test("an empty source parses empty when the writer repeats its last count", () => {
   const encodeInto = TextEncoder.prototype.encodeInto;
   const write = Buffer.prototype.write;

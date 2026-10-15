@@ -37,15 +37,20 @@ interface Exports {
   dialect(): number;
 }
 
+interface Instance {
+  exports: Exports;
+  grownAt: number;
+}
+
 const LANGS: Record<string, number> = { js: 0, ts: 1, jsx: 2, tsx: 3, dts: 4 };
 const SOURCE_TYPES: Record<string, number> = { script: 0, module: 1, commonjs: 2 };
 
-// memory never shrinks, so a source needing far less, at most 64 bytes a character, starts fresh
 const MEMORY_BYTES_MAX = 128 * 1024 * 1024;
+const MEMORY_IDLE_MS = 10_000;
 
 const encoder = new TextEncoder();
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-const instances = new WeakMap<WebAssembly.Module, Exports>();
+const instances = new WeakMap<WebAssembly.Module, Instance>();
 const dialects = new WeakMap<WebAssembly.Module, Dialect | null>();
 
 /** The `lang` a path implies: `"dts"`, `"tsx"`, `"ts"`, `"jsx"`, or `"js"`. */
@@ -74,27 +79,38 @@ export function run(
   options: RunOptions,
 ): ParseResult | Decoded {
   const module = options.wasm ?? yuku;
-  let exports = instances.get(module);
-  if (
-    exports === undefined ||
-    (exports.memory.buffer.byteLength > MEMORY_BYTES_MAX && source.length * 64 < MEMORY_BYTES_MAX)
-  ) {
-    exports = new WebAssembly.Instance(module).exports as unknown as Exports;
-    instances.set(module, exports);
-  }
+  const instance = instanceOf(module);
+  const { exports } = instance;
   const dialect = dialectOf(module, exports);
 
   const { memory, alloc, free } = exports;
+  const bytes = memory.buffer.byteLength;
   const capacity = source.length * 3 || 1;
   const pointer = alloc(capacity);
   const written = writeSource(memory.buffer, pointer, capacity, source);
   const result = exports[entry](pointer, written, flagsOf(options, dialect));
+  if (memory.buffer.byteLength > bytes) instance.grownAt = Date.now();
   free(pointer, capacity);
   if (result === 0) throw new Error("yuku: out of memory");
   const size = new DataView(memory.buffer).getUint32(result, true);
   const buffer = memory.buffer.slice(result + 4, result + 4 + size);
   free(result, 4 + size);
   return decode(buffer, source, options.path || null, dialect?.shapes ?? null);
+}
+
+function instanceOf(module: WebAssembly.Module): Instance {
+  let instance = instances.get(module);
+  if (instance === undefined) {
+    instance = { exports: instantiate(module), grownAt: 0 };
+    instances.set(module, instance);
+  } else if (instance.exports.memory.buffer.byteLength > MEMORY_BYTES_MAX) {
+    if (Date.now() - instance.grownAt > MEMORY_IDLE_MS) instance.exports = instantiate(module);
+  }
+  return instance;
+}
+
+function instantiate(module: WebAssembly.Module): Exports {
+  return new WebAssembly.Instance(module).exports as unknown as Exports;
 }
 
 function writeSource(
