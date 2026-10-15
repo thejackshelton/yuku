@@ -86,9 +86,9 @@ export function run(
   const { memory, alloc, free } = exports;
   const bytes = memory.buffer.byteLength;
   const capacity = source.length * 3 || 1;
-  const pointer = alloc(capacity);
+  const pointer = alloc(capacity) >>> 0;
   const written = writeSource(memory.buffer, pointer, capacity, source);
-  const result = exports[entry](pointer, written, flagsOf(options, dialect));
+  const result = exports[entry](pointer, written, flagsOf(options, dialect)) >>> 0;
   if (memory.buffer.byteLength > bytes) instance.grownAt = Date.now();
   free(pointer, capacity);
   if (result === 0) throw new Error("yuku: out of memory");
