@@ -676,6 +676,572 @@ function shaped(shape, start, end, children) {
   }
   return node;
 }
+function _decodeSequenceExpression(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "SequenceExpression", start, end, expressions: nodeArr(f1, f2, depth + 1) }; }
+function _decodeParenthesizedExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "ParenthesizedExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeArrowFunctionExpression(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
+      const r = {
+        type: "ArrowFunctionExpression", start, end,
+        id: null, generator: false, async: !!(flags & 2),
+        params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
+        body: node(f4, depth + 1), expression: !!(flags & 1),
+      };
+      if (_isTs) {
+        r.typeParameters = f1 !== NULL ? node(f1, depth + 1) : null;
+        r.returnType = f3 !== NULL ? node(f3, depth + 1) : null;
+      }
+      return r;
+ }
+function _decodeFunction(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5];
+      const ft = flags & 3;
+      const r = {
+        type: FUNCTION_TYPES[ft], start, end,
+        id: f1 !== NULL ? node(f1, depth + 1) : null,
+        generator: !!(flags & 4), async: !!(flags & 8),
+        params: f3 !== NULL ? fnParams(f3, depth + 1) : [],
+        body: f5 !== NULL ? node(f5, depth + 1) : null,
+        expression: false,
+      };
+      if (_isTs) {
+        r.typeParameters = f2 !== NULL ? node(f2, depth + 1) : null;
+        r.returnType = f4 !== NULL ? node(f4, depth + 1) : null;
+        r.declare = !!(flags & 16);
+      }
+      return r;
+ }
+function _decodeFormalParameters(decoder, i, b, flags, start, end, depth) { const { fnParams } = decoder; return { params: fnParams(i, depth + 1) };
+ }
+function _decodeConditionalExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "ConditionalExpression", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, consequent: f2 !== NULL ? node(f2, depth + 1) : null, alternate: f3 !== NULL ? node(f3, depth + 1) : null }; }
+function _decodeUnaryExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return {
+      type: "UnaryExpression", start, end,
+      operator: UNARY_OPS[flags & 7], prefix: true,
+      argument: f1 !== NULL ? node(f1, depth + 1) : null,
+    };
+ }
+function _decodeUpdateExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "UpdateExpression", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null, operator: UPDATE_OPS[flags & 1], prefix: !!(flags & 2) }; }
+function _decodeArrayExpression(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArrHoles } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ArrayExpression", start, end, elements: nodeArrHoles(f1, f2, depth + 1) }; }
+function _decodeObjectExpression(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ObjectExpression", start, end, properties: nodeArr(f1, f2, depth + 1) }; }
+function _decodeSpreadElement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "SpreadElement", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeChainExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "ChainExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTaggedTemplateExpression(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; const r = { type: "TaggedTemplateExpression", start, end, tag: f1 !== NULL ? node(f1, depth + 1) : null, quasi: f3 !== NULL ? node(f3, depth + 1) : null }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
+function _decodeNewExpression(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "NewExpression", start, end, callee: f1 !== NULL ? node(f1, depth + 1) : null, arguments: nodeArr(f3, f4, depth + 1) }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
+function _decodeAwaitExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "AwaitExpression", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeYieldExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "YieldExpression", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null, delegate: !!(flags & 1) }; }
+function _decodeMetaProperty(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "MetaProperty", start, end, meta: f1 !== NULL ? node(f1, depth + 1) : null, property: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeDecorator(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "Decorator", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeClass(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6], f7 = _u32[b + 7], f8 = _u32[b + 8], f9 = _u32[b + 9];
+      const r = {
+        type: CLASS_TYPES[flags & 1], start, end,
+        decorators: nodeArr(f1, f2, depth + 1),
+        id: f3 !== NULL ? node(f3, depth + 1) : null,
+        superClass: f5 !== NULL ? node(f5, depth + 1) : null,
+        body: node(f9, depth + 1),
+      };
+      if (_isTs) {
+        r.typeParameters = f4 !== NULL ? node(f4, depth + 1) : null;
+        r.superTypeArguments = f6 !== NULL ? node(f6, depth + 1) : null;
+        r.implements = nodeArr(f7, f8, depth + 1);
+        r.abstract = !!(flags & 2);
+        r.declare = !!(flags & 4);
+      }
+      return r;
+ }
+function _decodeClassBody(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ClassBody", start, end, body: nodeArr(f1, f2, depth + 1) }; }
+function _decodeMethodDefinition(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
+      const r = {
+        type: "MethodDefinition", start, end,
+        decorators: nodeArr(f1, f2, depth + 1),
+        key: node(f3, depth + 1), value: node(f4, depth + 1),
+        kind: METHOD_KINDS[flags & 3],
+        computed: !!(flags & 4), static: !!(flags & 8),
+      };
+      if (_isTs) {
+        r.override = !!(flags & 16);
+        r.optional = !!(flags & 32);
+        const _abs = !!(flags & 64);
+        r.accessibility = ACCESSIBILITY[(flags >> 7) & 3];
+        if (_abs) r.type = "TSAbstractMethodDefinition";
+      }
+      return r;
+ }
+function _decodePropertyDefinition(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5];
+      const _acc = !!(flags & 4);
+      const r = {
+        type: _acc ? "AccessorProperty" : "PropertyDefinition",
+        start, end,
+        decorators: nodeArr(f1, f2, depth + 1),
+        key: node(f3, depth + 1),
+        value: f5 !== NULL ? node(f5, depth + 1) : null,
+        computed: !!(flags & 1), static: !!(flags & 2),
+      };
+      if (_isTs) {
+        r.typeAnnotation = f4 !== NULL ? node(f4, depth + 1) : null;
+        r.declare = !!(flags & 8);
+        r.override = !!(flags & 16);
+        r.optional = !!(flags & 32);
+        r.definite = !!(flags & 64);
+        r.readonly = !!(flags & 128);
+        const _abs = !!(flags & 256);
+        r.accessibility = ACCESSIBILITY[(flags >> 9) & 3];
+        if (_abs)
+          r.type = _acc
+            ? "TSAbstractAccessorProperty"
+            : "TSAbstractPropertyDefinition";
+      }
+      return r;
+ }
+function _decodeStaticBlock(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "StaticBlock", start, end, body: nodeArr(f1, f2, depth + 1) }; }
+function _decodeSuper(decoder, i, b, flags, start, end, depth) { return { type: "Super", start, end }; }
+function _decodeBigintLiteral(decoder, i, b, flags, start, end, depth) { const { _src, _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2];
+      const r = _src.slice(start, end);
+      const d = str(f1, f2).replace(/_/g, "");
+      const v = BigInt(d);
+      return {
+        type: "Literal", start, end,
+        value: v, raw: r, bigint: v.toString(),
+      };
+ }
+function _decodeBooleanLiteral(decoder, i, b, flags, start, end, depth) {
+      const v = !!(flags & 1);
+      return {
+        type: "Literal", start, end,
+        value: v, raw: v ? "true" : "false",
+      };
+ }
+function _decodeNullLiteral(decoder, i, b, flags, start, end, depth) { return { type: "Literal", start, end, value: null, raw: "null" };
+ }
+function _decodeThisExpression(decoder, i, b, flags, start, end, depth) { return { type: "ThisExpression", start, end }; }
+function _decodeRegexpLiteral(decoder, i, b, flags, start, end, depth) { const { _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
+      const p = str(f1, f2), fl = str(f3, f4);
+      let v = null;
+      try { v = new RegExp(p, fl); } catch {}
+      return {
+        type: "Literal", start, end,
+        value: v, raw: "/" + p + "/" + fl,
+        regex: { pattern: p, flags: fl.split("").sort().join("") },
+      };
+ }
+function _decodeTemplateLiteral(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TemplateLiteral", start, end, quasis: nodeArr(f1, f2, depth + 1), expressions: nodeArr(f3, f4, depth + 1) }; }
+function _decodeTemplateElement(decoder, i, b, flags, start, end, depth) { const { _isTs, _src, _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2];
+      const raw = _src.slice(start, end).replace(/\r\n?/g, "\n");
+      const tl = !!(flags & 1);
+      const s = _isTs ? start - 1 : start;
+      const e = _isTs ? (tl ? end + 1 : end + 2) : end;
+      return {
+        type: "TemplateElement", start: s, end: e,
+        value: {
+          raw,
+          cooked: (flags & 2) ? null : str(f1, f2),
+        },
+        tail: tl,
+      };
+ }
+function _decodePrivateIdentifier(decoder, i, b, flags, start, end, depth) { const { _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "PrivateIdentifier", start, end, name: str(f1, f2) }; }
+function _decodeLabelIdentifier(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "Identifier", start, end, name: str(f1, f2) }; if (_isTs) { r.decorators = []; r.optional = false; r.typeAnnotation = null; } return r; }
+function _decodeSwitchStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "SwitchStatement", start, end, discriminant: f1 !== NULL ? node(f1, depth + 1) : null, cases: nodeArr(f2, f3, depth + 1) }; }
+function _decodeSwitchCase(decoder, i, b, flags, start, end, depth) { const { _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "SwitchCase", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, consequent: nodeArr(f2, f3, depth + 1) }; }
+function _decodeForStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "ForStatement", start, end, init: f1 !== NULL ? node(f1, depth + 1) : null, test: f2 !== NULL ? node(f2, depth + 1) : null, update: f3 !== NULL ? node(f3, depth + 1) : null, body: f4 !== NULL ? node(f4, depth + 1) : null }; }
+function _decodeForInStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "ForInStatement", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, body: f3 !== NULL ? node(f3, depth + 1) : null }; }
+function _decodeForOfStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "ForOfStatement", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, body: f3 !== NULL ? node(f3, depth + 1) : null, await: !!(flags & 1) }; }
+function _decodeWhileStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "WhileStatement", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeDoWhileStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "DoWhileStatement", start, end, body: f1 !== NULL ? node(f1, depth + 1) : null, test: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeBreakStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "BreakStatement", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeContinueStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "ContinueStatement", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeLabeledStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "LabeledStatement", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeWithStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "WithStatement", start, end, object: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeThrowStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "ThrowStatement", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTryStatement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "TryStatement", start, end, block: f1 !== NULL ? node(f1, depth + 1) : null, handler: f2 !== NULL ? node(f2, depth + 1) : null, finalizer: f3 !== NULL ? node(f3, depth + 1) : null }; }
+function _decodeCatchClause(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "CatchClause", start, end, param: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeDebuggerStatement(decoder, i, b, flags, start, end, depth) { return { type: "DebuggerStatement", start, end }; }
+function _decodeEmptyStatement(decoder, i, b, flags, start, end, depth) { return { type: "EmptyStatement", start, end }; }
+function _decodeDirective(decoder, i, b, flags, start, end, depth) { const { _u32, node, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
+      type: "ExpressionStatement", start, end,
+      expression: node(f1, depth + 1), directive: str(f2, f3),
+    };
+ }
+function _decodeAssignmentPattern(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; const r = { type: "AssignmentPattern", start, end, left: f3 !== NULL ? node(f3, depth + 1) : null, right: f5 !== NULL ? node(f5, depth + 1) : null }; if (_isTs) { r.decorators = nodeArr(f1, f2, depth + 1); r.typeAnnotation = f4 !== NULL ? node(f4, depth + 1) : null; r.optional = !!(flags & 1); } return r; }
+function _decodeBindingRestElement(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "RestElement", start, end, argument: f3 !== NULL ? node(f3, depth + 1) : null }; if (_isTs) { r.decorators = nodeArr(f1, f2, depth + 1); r.typeAnnotation = f4 !== NULL ? node(f4, depth + 1) : null; r.optional = !!(flags & 1); r.value = null; } return r; }
+function _decodeArrayPattern(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr, nodeArrHoles } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6];
+      const el = nodeArrHoles(f3, f4, depth + 1);
+      if (f5 !== NULL) el.push(node(f5, depth + 1));
+      const r = { type: "ArrayPattern", start, end, elements: el };
+      if (_isTs) {
+        r.decorators = nodeArr(f1, f2, depth + 1);
+        r.optional = !!(flags & 1);
+        r.typeAnnotation = f6 !== NULL ? node(f6, depth + 1) : null;
+      }
+      return r;
+ }
+function _decodeObjectPattern(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6];
+      const pr = nodeArr(f3, f4, depth + 1);
+      if (f5 !== NULL) pr.push(node(f5, depth + 1));
+      const r = { type: "ObjectPattern", start, end, properties: pr };
+      if (_isTs) {
+        r.decorators = nodeArr(f1, f2, depth + 1);
+        r.optional = !!(flags & 1);
+        r.typeAnnotation = f6 !== NULL ? node(f6, depth + 1) : null;
+      }
+      return r;
+ }
+function _decodeBindingProperty(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2];
+      const r = {
+        type: "Property", start, end,
+        kind: "init",
+        key: node(f1, depth + 1), value: node(f2, depth + 1),
+        method: false,
+        shorthand: !!(flags & 1),
+        computed: !!(flags & 2),
+      }; if (_isTs) { r.optional = false; } return r; }
+function _decodeProgram(decoder, i, b, flags, start, end, depth) { const { _p, _u32, nodeArr, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return {
+      type: "Program", start, end,
+      sourceType: (flags & 1) ? "module" : "script",
+      hashbang: (flags & 4) ? {
+        type: "Hashbang",
+        start: _p(f3 - 2), end: _p(f4),
+        value: str(f3, f4),
+      } : null,
+      body: nodeArr(f1, f2, depth + 1),
+    };
+ }
+function _decodeImportExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ImportExpression", start, end, source: f1 !== NULL ? node(f1, depth + 1) : null, options: f2 !== NULL ? node(f2, depth + 1) : null, phase: (flags & 1) ? ["source", "defer"][(flags >> 1) & 1] : null }; }
+function _decodeImportDeclaration(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; const r = { type: "ImportDeclaration", start, end, specifiers: nodeArr(f1, f2, depth + 1), source: f3 !== NULL ? node(f3, depth + 1) : null, attributes: nodeArr(f4, f5, depth + 1), phase: (flags & 1) ? ["source", "defer"][(flags >> 1) & 1] : null }; if (_isTs) { r.importKind = IMPORT_EXPORT_KINDS[(flags >> 2) & 1]; } return r; }
+function _decodeImportSpecifier(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "ImportSpecifier", start, end, imported: f1 !== NULL ? node(f1, depth + 1) : null, local: f2 !== NULL ? node(f2, depth + 1) : null }; if (_isTs) { r.importKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
+function _decodeImportDefaultSpecifier(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "ImportDefaultSpecifier", start, end, local: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeImportNamespaceSpecifier(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "ImportNamespaceSpecifier", start, end, local: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeImportAttribute(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ImportAttribute", start, end, key: f1 !== NULL ? node(f1, depth + 1) : null, value: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeExportNamedDeclaration(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6]; const r = { type: "ExportNamedDeclaration", start, end, declaration: f1 !== NULL ? node(f1, depth + 1) : null, specifiers: nodeArr(f2, f3, depth + 1), source: f4 !== NULL ? node(f4, depth + 1) : null, attributes: nodeArr(f5, f6, depth + 1) }; if (_isTs) { r.exportKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
+function _decodeExportDefaultDeclaration(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node } = decoder; const f1 = _u32[b + 1]; const r = { type: "ExportDefaultDeclaration", start, end, declaration: f1 !== NULL ? node(f1, depth + 1) : null }; if (_isTs) { r.exportKind = "value"; } return r; }
+function _decodeExportAllDeclaration(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "ExportAllDeclaration", start, end, exported: f1 !== NULL ? node(f1, depth + 1) : null, source: f2 !== NULL ? node(f2, depth + 1) : null, attributes: nodeArr(f3, f4, depth + 1) }; if (_isTs) { r.exportKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
+function _decodeExportSpecifier(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "ExportSpecifier", start, end, local: f1 !== NULL ? node(f1, depth + 1) : null, exported: f2 !== NULL ? node(f2, depth + 1) : null }; if (_isTs) { r.exportKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
+function _decodeTSAnyKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSAnyKeyword", start, end }; }
+function _decodeTSUnknownKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSUnknownKeyword", start, end }; }
+function _decodeTSNeverKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSNeverKeyword", start, end }; }
+function _decodeTSVoidKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSVoidKeyword", start, end }; }
+function _decodeTSNullKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSNullKeyword", start, end }; }
+function _decodeTSUndefinedKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSUndefinedKeyword", start, end }; }
+function _decodeTSStringKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSStringKeyword", start, end }; }
+function _decodeTSNumberKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSNumberKeyword", start, end }; }
+function _decodeTSBigintKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSBigIntKeyword", start, end }; }
+function _decodeTSBooleanKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSBooleanKeyword", start, end }; }
+function _decodeTSSymbolKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSSymbolKeyword", start, end }; }
+function _decodeTSObjectKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSObjectKeyword", start, end }; }
+function _decodeTSIntrinsicKeyword(decoder, i, b, flags, start, end, depth) { return { type: "TSIntrinsicKeyword", start, end }; }
+function _decodeTSThisType(decoder, i, b, flags, start, end, depth) { return { type: "TSThisType", start, end }; }
+function _decodeTSQualifiedName(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSQualifiedName", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSTypeQuery(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeQuery", start, end, exprName: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSImportType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TSImportType", start, end, source: f1 !== NULL ? node(f1, depth + 1) : null, options: f2 !== NULL ? node(f2, depth + 1) : null, qualifier: f3 !== NULL ? node(f3, depth + 1) : null, typeArguments: f4 !== NULL ? node(f4, depth + 1) : null }; }
+function _decodeTSTypeParameter(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "TSTypeParameter", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null, constraint: f2 !== NULL ? node(f2, depth + 1) : null, default: f3 !== NULL ? node(f3, depth + 1) : null, in: !!(flags & 1), out: !!(flags & 2), const: !!(flags & 4) }; }
+function _decodeTSTypeParameterDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeParameterDeclaration", start, end, params: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSTypeParameterInstantiation(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeParameterInstantiation", start, end, params: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSLiteralType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSLiteralType", start, end, literal: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSTemplateLiteralType(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TSTemplateLiteralType", start, end, quasis: nodeArr(f1, f2, depth + 1), types: nodeArr(f3, f4, depth + 1) }; }
+function _decodeTSArrayType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSArrayType", start, end, elementType: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSIndexedAccessType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSIndexedAccessType", start, end, objectType: f1 !== NULL ? node(f1, depth + 1) : null, indexType: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSTupleType(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTupleType", start, end, elementTypes: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSNamedTupleMember(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSNamedTupleMember", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null, elementType: f2 !== NULL ? node(f2, depth + 1) : null, optional: !!(flags & 1) }; }
+function _decodeTSOptionalType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSOptionalType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSRestType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSRestType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSJsdocNullableType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSJSDocNullableType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null, postfix: !!(flags & 1) }; }
+function _decodeTSJsdocNonNullableType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSJSDocNonNullableType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null, postfix: !!(flags & 1) }; }
+function _decodeTSJsdocUnknownType(decoder, i, b, flags, start, end, depth) { return { type: "TSJSDocUnknownType", start, end }; }
+function _decodeTSUnionType(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSUnionType", start, end, types: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSIntersectionType(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSIntersectionType", start, end, types: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSConditionalType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TSConditionalType", start, end, checkType: f1 !== NULL ? node(f1, depth + 1) : null, extendsType: f2 !== NULL ? node(f2, depth + 1) : null, trueType: f3 !== NULL ? node(f3, depth + 1) : null, falseType: f4 !== NULL ? node(f4, depth + 1) : null }; }
+function _decodeTSInferType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSInferType", start, end, typeParameter: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSTypeOperator(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSTypeOperator", start, end, operator: TS_TYPE_OPERATORS[flags & 3], typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSParenthesizedType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSParenthesizedType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSFunctionType(decoder, i, b, flags, start, end, depth) { const { _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
+      type: "TSFunctionType", start, end,
+      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
+      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
+      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
+    };
+ }
+function _decodeTSConstructorType(decoder, i, b, flags, start, end, depth) { const { _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
+      type: "TSConstructorType", start, end,
+      abstract: !!(flags & 1),
+      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
+      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
+      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
+    };
+ }
+function _decodeTSTypePredicate(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypePredicate", start, end, parameterName: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null, asserts: !!(flags & 1) }; }
+function _decodeTSTypeLiteral(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeLiteral", start, end, members: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSMappedType(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return {
+      type: "TSMappedType", start, end,
+      key: node(f1, depth + 1),
+      constraint: node(f2, depth + 1),
+      nameType: f3 !== NULL ? node(f3, depth + 1) : null,
+      typeAnnotation: f4 !== NULL ? node(f4, depth + 1) : null,
+      optional: TS_MAPPED_OPTIONAL[(flags >> 0) & 3],
+      readonly: TS_MAPPED_READONLY[(flags >> 2) & 3],
+    };
+ }
+function _decodeTSPropertySignature(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "TSPropertySignature", start, end, key: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null, computed: !!(flags & 1), optional: !!(flags & 2), readonly: !!(flags & 4) }; if (_isTs) { r.accessibility = null; r.static = false; } return r; }
+function _decodeTSMethodSignature(decoder, i, b, flags, start, end, depth) { const { _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return {
+      type: "TSMethodSignature", start, end,
+      key: node(f1, depth + 1),
+      computed: !!(flags & 4),
+      optional: !!(flags & 8),
+      kind: TS_METHOD_SIGNATURE_KINDS[(flags >> 0) & 3],
+      typeParameters: f2 !== NULL ? node(f2, depth + 1) : null,
+      params: f3 !== NULL ? fnParams(f3, depth + 1) : [],
+      returnType: f4 !== NULL ? node(f4, depth + 1) : null,
+      accessibility: null, readonly: false, static: false,
+    };
+ }
+function _decodeTSCallSignatureDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
+      type: "TSCallSignatureDeclaration", start, end,
+      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
+      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
+      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
+    };
+ }
+function _decodeTSConstructSignatureDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, fnParams, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
+      type: "TSConstructSignatureDeclaration", start, end,
+      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
+      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
+      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
+    };
+ }
+function _decodeTSIndexSignature(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; const r = { type: "TSIndexSignature", start, end, parameters: nodeArr(f1, f2, depth + 1), typeAnnotation: f3 !== NULL ? node(f3, depth + 1) : null, readonly: !!(flags & 1) }; if (_isTs) { r.static = !!(flags & 2); r.accessibility = null; } return r; }
+function _decodeTSTypeAliasDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "TSTypeAliasDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, typeParameters: f2 !== NULL ? node(f2, depth + 1) : null, typeAnnotation: f3 !== NULL ? node(f3, depth + 1) : null, declare: !!(flags & 1) }; }
+function _decodeTSInterfaceDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; return { type: "TSInterfaceDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, typeParameters: f2 !== NULL ? node(f2, depth + 1) : null, extends: nodeArr(f3, f4, depth + 1), body: f5 !== NULL ? node(f5, depth + 1) : null, declare: !!(flags & 1) }; }
+function _decodeTSInterfaceBody(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSInterfaceBody", start, end, body: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSInterfaceHeritage(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSInterfaceHeritage", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSClassImplements(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSClassImplements", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSEnumDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSEnumDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null, const: !!(flags & 1), declare: !!(flags & 2) }; }
+function _decodeTSEnumBody(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSEnumBody", start, end, members: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSEnumMember(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSEnumMember", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, initializer: f2 !== NULL ? node(f2, depth + 1) : null, computed: !!(flags & 1) }; }
+function _decodeTSModuleDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2];
+      const r = {
+        type: "TSModuleDeclaration", start, end,
+        id: node(f1, depth + 1),
+        kind: TS_MODULE_KINDS[(flags >> 0) & 1],
+        declare: !!(flags & 2),
+        global: false,
+      };
+      if (f2 !== NULL) r.body = node(f2, depth + 1);
+      return r;
+ }
+function _decodeTSModuleBlock(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSModuleBlock", start, end, body: nodeArr(f1, f2, depth + 1) }; }
+function _decodeTSGlobalDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return {
+      type: "TSModuleDeclaration", start, end,
+      id: node(f1, depth + 1), body: node(f2, depth + 1),
+      kind: "global",
+      declare: !!(flags & 1),
+      global: true,
+    };
+ }
+function _decodeTSParameterProperty(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; const r = { type: "TSParameterProperty", start, end, decorators: nodeArr(f1, f2, depth + 1), parameter: f3 !== NULL ? node(f3, depth + 1) : null, override: !!(flags & 1), readonly: !!(flags & 2), accessibility: ACCESSIBILITY[(flags >> 2) & 3] }; if (_isTs) { r.static = false; } return r; }
+function _decodeTSThisParameter(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return {
+      type: "Identifier", start, end,
+      decorators: [],
+      name: "this", optional: false,
+      typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null,
+    };
+ }
+function _decodeTSAsExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSAsExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSSatisfiesExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSSatisfiesExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSTypeAssertion(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeAssertion", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null, expression: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSNonNullExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSNonNullExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSInstantiationExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSInstantiationExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeTSExportAssignment(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSExportAssignment", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSNamespaceExportDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSNamespaceExportDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeTSImportEqualsDeclaration(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSImportEqualsDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, moduleReference: f2 !== NULL ? node(f2, depth + 1) : null, importKind: IMPORT_EXPORT_KINDS[flags & 1] }; }
+function _decodeTSExternalModuleReference(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "TSExternalModuleReference", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeJSXElement(decoder, i, b, flags, start, end, depth) { const { _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "JSXElement", start, end, openingElement: f1 !== NULL ? node(f1, depth + 1) : null, children: nodeArr(f2, f3, depth + 1), closingElement: f4 !== NULL ? node(f4, depth + 1) : null }; }
+function _decodeJSXOpeningElement(decoder, i, b, flags, start, end, depth) { const { _isTs, _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "JSXOpeningElement", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null, attributes: nodeArr(f3, f4, depth + 1), selfClosing: !!(flags & 1) }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
+function _decodeJSXClosingElement(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "JSXClosingElement", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeJSXFragment(decoder, i, b, flags, start, end, depth) { const { _u32, node, nodeArr } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "JSXFragment", start, end, openingFragment: f1 !== NULL ? node(f1, depth + 1) : null, children: nodeArr(f2, f3, depth + 1), closingFragment: f4 !== NULL ? node(f4, depth + 1) : null }; }
+function _decodeJSXOpeningFragment(decoder, i, b, flags, start, end, depth) { return { type: "JSXOpeningFragment", start, end }; }
+function _decodeJSXClosingFragment(decoder, i, b, flags, start, end, depth) { return { type: "JSXClosingFragment", start, end }; }
+function _decodeJSXIdentifier(decoder, i, b, flags, start, end, depth) { const { _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXIdentifier", start, end, name: str(f1, f2) }; }
+function _decodeJSXNamespacedName(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXNamespacedName", start, end, namespace: f1 !== NULL ? node(f1, depth + 1) : null, name: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeJSXMemberExpression(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXMemberExpression", start, end, object: f1 !== NULL ? node(f1, depth + 1) : null, property: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeJSXAttribute(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXAttribute", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null, value: f2 !== NULL ? node(f2, depth + 1) : null }; }
+function _decodeJSXSpreadAttribute(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "JSXSpreadAttribute", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeJSXExpressionContainer(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "JSXExpressionContainer", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeJSXEmptyExpression(decoder, i, b, flags, start, end, depth) { return { type: "JSXEmptyExpression", start, end }; }
+function _decodeJSXText(decoder, i, b, flags, start, end, depth) { const { _u32, str } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
+      const value = str(f1, f2);
+      return { type: "JSXText", start, end, value, raw: str(f3, f4) };
+ }
+function _decodeJSXSpreadChild(decoder, i, b, flags, start, end, depth) { const { _u32, node } = decoder; const f1 = _u32[b + 1]; return { type: "JSXSpreadChild", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
+function _decodeDialect(decoder, i, b, flags, start, end, depth) { const { _u32, nodeArrHoles, shapes } = decoder; const f1 = _u32[b + 1], f2 = _u32[b + 2]; return shaped(shapes[flags], start, end, nodeArrHoles(f1, f2, depth + 1)); }
+const KIND_DECODERS = [
+  _decodeSequenceExpression,
+  _decodeParenthesizedExpression,
+  _decodeArrowFunctionExpression,
+  _decodeFunction,
+  null,
+  null,
+  _decodeFormalParameters,
+  null,
+  null,
+  null,
+  _decodeConditionalExpression,
+  _decodeUnaryExpression,
+  _decodeUpdateExpression,
+  null,
+  _decodeArrayExpression,
+  _decodeObjectExpression,
+  _decodeSpreadElement,
+  null,
+  null,
+  null,
+  _decodeChainExpression,
+  _decodeTaggedTemplateExpression,
+  _decodeNewExpression,
+  _decodeAwaitExpression,
+  _decodeYieldExpression,
+  _decodeMetaProperty,
+  _decodeDecorator,
+  _decodeClass,
+  _decodeClassBody,
+  _decodeMethodDefinition,
+  _decodePropertyDefinition,
+  _decodeStaticBlock,
+  _decodeSuper,
+  null,
+  null,
+  _decodeBigintLiteral,
+  _decodeBooleanLiteral,
+  _decodeNullLiteral,
+  _decodeThisExpression,
+  _decodeRegexpLiteral,
+  _decodeTemplateLiteral,
+  _decodeTemplateElement,
+  null,
+  _decodePrivateIdentifier,
+  null,
+  null,
+  _decodeLabelIdentifier,
+  null,
+  null,
+  _decodeSwitchStatement,
+  _decodeSwitchCase,
+  _decodeForStatement,
+  _decodeForInStatement,
+  _decodeForOfStatement,
+  _decodeWhileStatement,
+  _decodeDoWhileStatement,
+  _decodeBreakStatement,
+  _decodeContinueStatement,
+  _decodeLabeledStatement,
+  _decodeWithStatement,
+  null,
+  _decodeThrowStatement,
+  _decodeTryStatement,
+  _decodeCatchClause,
+  _decodeDebuggerStatement,
+  _decodeEmptyStatement,
+  null,
+  null,
+  _decodeDirective,
+  _decodeAssignmentPattern,
+  _decodeBindingRestElement,
+  _decodeArrayPattern,
+  _decodeObjectPattern,
+  _decodeBindingProperty,
+  _decodeProgram,
+  _decodeImportExpression,
+  _decodeImportDeclaration,
+  _decodeImportSpecifier,
+  _decodeImportDefaultSpecifier,
+  _decodeImportNamespaceSpecifier,
+  _decodeImportAttribute,
+  _decodeExportNamedDeclaration,
+  _decodeExportDefaultDeclaration,
+  _decodeExportAllDeclaration,
+  _decodeExportSpecifier,
+  null,
+  _decodeTSAnyKeyword,
+  _decodeTSUnknownKeyword,
+  _decodeTSNeverKeyword,
+  _decodeTSVoidKeyword,
+  _decodeTSNullKeyword,
+  _decodeTSUndefinedKeyword,
+  _decodeTSStringKeyword,
+  _decodeTSNumberKeyword,
+  _decodeTSBigintKeyword,
+  _decodeTSBooleanKeyword,
+  _decodeTSSymbolKeyword,
+  _decodeTSObjectKeyword,
+  _decodeTSIntrinsicKeyword,
+  _decodeTSThisType,
+  null,
+  _decodeTSQualifiedName,
+  _decodeTSTypeQuery,
+  _decodeTSImportType,
+  _decodeTSTypeParameter,
+  _decodeTSTypeParameterDeclaration,
+  _decodeTSTypeParameterInstantiation,
+  _decodeTSLiteralType,
+  _decodeTSTemplateLiteralType,
+  _decodeTSArrayType,
+  _decodeTSIndexedAccessType,
+  _decodeTSTupleType,
+  _decodeTSNamedTupleMember,
+  _decodeTSOptionalType,
+  _decodeTSRestType,
+  _decodeTSJsdocNullableType,
+  _decodeTSJsdocNonNullableType,
+  _decodeTSJsdocUnknownType,
+  _decodeTSUnionType,
+  _decodeTSIntersectionType,
+  _decodeTSConditionalType,
+  _decodeTSInferType,
+  _decodeTSTypeOperator,
+  _decodeTSParenthesizedType,
+  _decodeTSFunctionType,
+  _decodeTSConstructorType,
+  _decodeTSTypePredicate,
+  _decodeTSTypeLiteral,
+  _decodeTSMappedType,
+  _decodeTSPropertySignature,
+  _decodeTSMethodSignature,
+  _decodeTSCallSignatureDeclaration,
+  _decodeTSConstructSignatureDeclaration,
+  _decodeTSIndexSignature,
+  _decodeTSTypeAliasDeclaration,
+  _decodeTSInterfaceDeclaration,
+  _decodeTSInterfaceBody,
+  _decodeTSInterfaceHeritage,
+  _decodeTSClassImplements,
+  _decodeTSEnumDeclaration,
+  _decodeTSEnumBody,
+  _decodeTSEnumMember,
+  _decodeTSModuleDeclaration,
+  _decodeTSModuleBlock,
+  _decodeTSGlobalDeclaration,
+  _decodeTSParameterProperty,
+  _decodeTSThisParameter,
+  _decodeTSAsExpression,
+  _decodeTSSatisfiesExpression,
+  _decodeTSTypeAssertion,
+  _decodeTSNonNullExpression,
+  _decodeTSInstantiationExpression,
+  _decodeTSExportAssignment,
+  _decodeTSNamespaceExportDeclaration,
+  _decodeTSImportEqualsDeclaration,
+  _decodeTSExternalModuleReference,
+  _decodeJSXElement,
+  _decodeJSXOpeningElement,
+  _decodeJSXClosingElement,
+  _decodeJSXFragment,
+  _decodeJSXOpeningFragment,
+  _decodeJSXClosingFragment,
+  _decodeJSXIdentifier,
+  _decodeJSXNamespacedName,
+  _decodeJSXMemberExpression,
+  _decodeJSXAttribute,
+  _decodeJSXSpreadAttribute,
+  _decodeJSXExpressionContainer,
+  _decodeJSXEmptyExpression,
+  _decodeJSXText,
+  _decodeJSXSpreadChild,
+  _decodeDialect,
+];
 function decode(buffer, source, path, shapes) {
   const _u8 = new Uint8Array(buffer);
   const _u32 = new Int32Array(buffer, 0, buffer.byteLength >> 2);
@@ -803,131 +1369,16 @@ function decode(buffer, source, path, shapes) {
     const start = _ss <= _firstNa ? _ss : pm[_ss - _firstNa];
     const end = _se <= _firstNa ? _se : pm[_se - _firstNa];
     switch (tag) {
-    case 0: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "SequenceExpression", start, end, expressions: nodeArr(f1, f2, depth + 1) }; }
-    case 1: { const f1 = _u32[b + 1]; return { type: "ParenthesizedExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 2: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
-      const r = {
-        type: "ArrowFunctionExpression", start, end,
-        id: null, generator: false, async: !!(flags & 2),
-        params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
-        body: node(f4, depth + 1), expression: !!(flags & 1),
-      };
-      if (_isTs) {
-        r.typeParameters = f1 !== NULL ? node(f1, depth + 1) : null;
-        r.returnType = f3 !== NULL ? node(f3, depth + 1) : null;
-      }
-      return r;
- }
-    case 3: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5];
-      const ft = flags & 3;
-      const r = {
-        type: FUNCTION_TYPES[ft], start, end,
-        id: f1 !== NULL ? node(f1, depth + 1) : null,
-        generator: !!(flags & 4), async: !!(flags & 8),
-        params: f3 !== NULL ? fnParams(f3, depth + 1) : [],
-        body: f5 !== NULL ? node(f5, depth + 1) : null,
-        expression: false,
-      };
-      if (_isTs) {
-        r.typeParameters = f2 !== NULL ? node(f2, depth + 1) : null;
-        r.returnType = f4 !== NULL ? node(f4, depth + 1) : null;
-        r.declare = !!(flags & 16);
-      }
-      return r;
- }
     case 4: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "BlockStatement", start, end, body: nodeArr(f1, f2, depth + 1) }; }
     case 5: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "BlockStatement", start, end, body: nodeArr(f1, f2, depth + 1) }; }
-    case 6: { return { params: fnParams(i, depth + 1) };
- }
     case 7: { const f1 = _u32[b + 1]; return node(f1, depth + 1);
  }
     case 8: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "BinaryExpression", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, operator: BINARY_OPS[flags & 31] }; }
     case 9: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "LogicalExpression", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, operator: LOGICAL_OPS[flags & 3] }; }
-    case 10: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "ConditionalExpression", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, consequent: f2 !== NULL ? node(f2, depth + 1) : null, alternate: f3 !== NULL ? node(f3, depth + 1) : null }; }
-    case 11: { const f1 = _u32[b + 1]; return {
-      type: "UnaryExpression", start, end,
-      operator: UNARY_OPS[flags & 7], prefix: true,
-      argument: f1 !== NULL ? node(f1, depth + 1) : null,
-    };
- }
-    case 12: { const f1 = _u32[b + 1]; return { type: "UpdateExpression", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null, operator: UPDATE_OPS[flags & 1], prefix: !!(flags & 2) }; }
     case 13: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "AssignmentExpression", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, operator: ASSIGNMENT_OPS[flags & 15] }; }
-    case 14: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ArrayExpression", start, end, elements: nodeArrHoles(f1, f2, depth + 1) }; }
-    case 15: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ObjectExpression", start, end, properties: nodeArr(f1, f2, depth + 1) }; }
-    case 16: { const f1 = _u32[b + 1]; return { type: "SpreadElement", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
     case 17: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "Property", start, end, key: f1 !== NULL ? node(f1, depth + 1) : null, value: f2 !== NULL ? node(f2, depth + 1) : null, kind: PROPERTY_KINDS[flags & 3], method: !!(flags & 4), shorthand: !!(flags & 8), computed: !!(flags & 16) }; if (_isTs) { r.optional = false; } return r; }
     case 18: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "MemberExpression", start, end, object: f1 !== NULL ? node(f1, depth + 1) : null, property: f2 !== NULL ? node(f2, depth + 1) : null, computed: !!(flags & 1), optional: !!(flags & 2) }; }
     case 19: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "CallExpression", start, end, callee: f1 !== NULL ? node(f1, depth + 1) : null, arguments: nodeArr(f3, f4, depth + 1), optional: !!(flags & 1) }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
-    case 20: { const f1 = _u32[b + 1]; return { type: "ChainExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 21: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; const r = { type: "TaggedTemplateExpression", start, end, tag: f1 !== NULL ? node(f1, depth + 1) : null, quasi: f3 !== NULL ? node(f3, depth + 1) : null }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
-    case 22: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "NewExpression", start, end, callee: f1 !== NULL ? node(f1, depth + 1) : null, arguments: nodeArr(f3, f4, depth + 1) }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
-    case 23: { const f1 = _u32[b + 1]; return { type: "AwaitExpression", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 24: { const f1 = _u32[b + 1]; return { type: "YieldExpression", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null, delegate: !!(flags & 1) }; }
-    case 25: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "MetaProperty", start, end, meta: f1 !== NULL ? node(f1, depth + 1) : null, property: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 26: { const f1 = _u32[b + 1]; return { type: "Decorator", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 27: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6], f7 = _u32[b + 7], f8 = _u32[b + 8], f9 = _u32[b + 9];
-      const r = {
-        type: CLASS_TYPES[flags & 1], start, end,
-        decorators: nodeArr(f1, f2, depth + 1),
-        id: f3 !== NULL ? node(f3, depth + 1) : null,
-        superClass: f5 !== NULL ? node(f5, depth + 1) : null,
-        body: node(f9, depth + 1),
-      };
-      if (_isTs) {
-        r.typeParameters = f4 !== NULL ? node(f4, depth + 1) : null;
-        r.superTypeArguments = f6 !== NULL ? node(f6, depth + 1) : null;
-        r.implements = nodeArr(f7, f8, depth + 1);
-        r.abstract = !!(flags & 2);
-        r.declare = !!(flags & 4);
-      }
-      return r;
- }
-    case 28: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ClassBody", start, end, body: nodeArr(f1, f2, depth + 1) }; }
-    case 29: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
-      const r = {
-        type: "MethodDefinition", start, end,
-        decorators: nodeArr(f1, f2, depth + 1),
-        key: node(f3, depth + 1), value: node(f4, depth + 1),
-        kind: METHOD_KINDS[flags & 3],
-        computed: !!(flags & 4), static: !!(flags & 8),
-      };
-      if (_isTs) {
-        r.override = !!(flags & 16);
-        r.optional = !!(flags & 32);
-        const _abs = !!(flags & 64);
-        r.accessibility = ACCESSIBILITY[(flags >> 7) & 3];
-        if (_abs) r.type = "TSAbstractMethodDefinition";
-      }
-      return r;
- }
-    case 30: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5];
-      const _acc = !!(flags & 4);
-      const r = {
-        type: _acc ? "AccessorProperty" : "PropertyDefinition",
-        start, end,
-        decorators: nodeArr(f1, f2, depth + 1),
-        key: node(f3, depth + 1),
-        value: f5 !== NULL ? node(f5, depth + 1) : null,
-        computed: !!(flags & 1), static: !!(flags & 2),
-      };
-      if (_isTs) {
-        r.typeAnnotation = f4 !== NULL ? node(f4, depth + 1) : null;
-        r.declare = !!(flags & 8);
-        r.override = !!(flags & 16);
-        r.optional = !!(flags & 32);
-        r.definite = !!(flags & 64);
-        r.readonly = !!(flags & 128);
-        const _abs = !!(flags & 256);
-        r.accessibility = ACCESSIBILITY[(flags >> 9) & 3];
-        if (_abs)
-          r.type = _acc
-            ? "TSAbstractAccessorProperty"
-            : "TSAbstractPropertyDefinition";
-      }
-      return r;
- }
-    case 31: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "StaticBlock", start, end, body: nodeArr(f1, f2, depth + 1) }; }
-    case 32: { return { type: "Super", start, end }; }
     case 33: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return {
       type: "Literal", start, end,
       value: str(f1, f2), raw: _src.slice(start, end),
@@ -945,293 +1396,17 @@ function decode(buffer, source, path, shapes) {
         raw: r,
       };
  }
-    case 35: { const f1 = _u32[b + 1], f2 = _u32[b + 2];
-      const r = _src.slice(start, end);
-      const d = str(f1, f2).replace(/_/g, "");
-      const v = BigInt(d);
-      return {
-        type: "Literal", start, end,
-        value: v, raw: r, bigint: v.toString(),
-      };
- }
-    case 36: {
-      const v = !!(flags & 1);
-      return {
-        type: "Literal", start, end,
-        value: v, raw: v ? "true" : "false",
-      };
- }
-    case 37: { return { type: "Literal", start, end, value: null, raw: "null" };
- }
-    case 38: { return { type: "ThisExpression", start, end }; }
-    case 39: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
-      const p = str(f1, f2), fl = str(f3, f4);
-      let v = null;
-      try { v = new RegExp(p, fl); } catch {}
-      return {
-        type: "Literal", start, end,
-        value: v, raw: "/" + p + "/" + fl,
-        regex: { pattern: p, flags: fl.split("").sort().join("") },
-      };
- }
-    case 40: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TemplateLiteral", start, end, quasis: nodeArr(f1, f2, depth + 1), expressions: nodeArr(f3, f4, depth + 1) }; }
-    case 41: { const f1 = _u32[b + 1], f2 = _u32[b + 2];
-      const raw = _src.slice(start, end).replace(/\r\n?/g, "\n");
-      const tl = !!(flags & 1);
-      const s = _isTs ? start - 1 : start;
-      const e = _isTs ? (tl ? end + 1 : end + 2) : end;
-      return {
-        type: "TemplateElement", start: s, end: e,
-        value: {
-          raw,
-          cooked: (flags & 2) ? null : str(f1, f2),
-        },
-        tail: tl,
-      };
- }
     case 42: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "Identifier", start, end, name: str(f1, f2) }; if (_isTs) { r.decorators = []; r.optional = false; r.typeAnnotation = null; } return r; }
-    case 43: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "PrivateIdentifier", start, end, name: str(f1, f2) }; }
     case 44: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; const r = { type: "Identifier", start, end, name: str(f1, f2) }; if (_isTs) { r.decorators = nodeArr(f3, f4, depth + 1); r.typeAnnotation = f5 !== NULL ? node(f5, depth + 1) : null; r.optional = !!(flags & 1); } return r; }
     case 45: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "Identifier", start, end, name: str(f1, f2) }; if (_isTs) { r.decorators = []; r.optional = false; r.typeAnnotation = null; } return r; }
-    case 46: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "Identifier", start, end, name: str(f1, f2) }; if (_isTs) { r.decorators = []; r.optional = false; r.typeAnnotation = null; } return r; }
     case 47: { const f1 = _u32[b + 1]; const r = { type: "ExpressionStatement", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; if (_isTs) { r.directive = null; } return r; }
     case 48: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "IfStatement", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, consequent: f2 !== NULL ? node(f2, depth + 1) : null, alternate: f3 !== NULL ? node(f3, depth + 1) : null }; }
-    case 49: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "SwitchStatement", start, end, discriminant: f1 !== NULL ? node(f1, depth + 1) : null, cases: nodeArr(f2, f3, depth + 1) }; }
-    case 50: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "SwitchCase", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, consequent: nodeArr(f2, f3, depth + 1) }; }
-    case 51: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "ForStatement", start, end, init: f1 !== NULL ? node(f1, depth + 1) : null, test: f2 !== NULL ? node(f2, depth + 1) : null, update: f3 !== NULL ? node(f3, depth + 1) : null, body: f4 !== NULL ? node(f4, depth + 1) : null }; }
-    case 52: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "ForInStatement", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, body: f3 !== NULL ? node(f3, depth + 1) : null }; }
-    case 53: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "ForOfStatement", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null, body: f3 !== NULL ? node(f3, depth + 1) : null, await: !!(flags & 1) }; }
-    case 54: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "WhileStatement", start, end, test: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 55: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "DoWhileStatement", start, end, body: f1 !== NULL ? node(f1, depth + 1) : null, test: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 56: { const f1 = _u32[b + 1]; return { type: "BreakStatement", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 57: { const f1 = _u32[b + 1]; return { type: "ContinueStatement", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 58: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "LabeledStatement", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 59: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "WithStatement", start, end, object: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
     case 60: { const f1 = _u32[b + 1]; return { type: "ReturnStatement", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 61: { const f1 = _u32[b + 1]; return { type: "ThrowStatement", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 62: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "TryStatement", start, end, block: f1 !== NULL ? node(f1, depth + 1) : null, handler: f2 !== NULL ? node(f2, depth + 1) : null, finalizer: f3 !== NULL ? node(f3, depth + 1) : null }; }
-    case 63: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "CatchClause", start, end, param: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 64: { return { type: "DebuggerStatement", start, end }; }
-    case 65: { return { type: "EmptyStatement", start, end }; }
     case 66: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "VariableDeclaration", start, end, kind: VAR_KINDS[flags & 7], declarations: nodeArr(f1, f2, depth + 1) }; if (_isTs) { r.declare = !!(flags & 8); } return r; }
     case 67: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "VariableDeclarator", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, init: f2 !== NULL ? node(f2, depth + 1) : null }; if (_isTs) { r.definite = !!(flags & 1); } return r; }
-    case 68: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
-      type: "ExpressionStatement", start, end,
-      expression: node(f1, depth + 1), directive: str(f2, f3),
-    };
- }
-    case 69: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; const r = { type: "AssignmentPattern", start, end, left: f3 !== NULL ? node(f3, depth + 1) : null, right: f5 !== NULL ? node(f5, depth + 1) : null }; if (_isTs) { r.decorators = nodeArr(f1, f2, depth + 1); r.typeAnnotation = f4 !== NULL ? node(f4, depth + 1) : null; r.optional = !!(flags & 1); } return r; }
-    case 70: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "RestElement", start, end, argument: f3 !== NULL ? node(f3, depth + 1) : null }; if (_isTs) { r.decorators = nodeArr(f1, f2, depth + 1); r.typeAnnotation = f4 !== NULL ? node(f4, depth + 1) : null; r.optional = !!(flags & 1); r.value = null; } return r; }
-    case 71: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6];
-      const el = nodeArrHoles(f3, f4, depth + 1);
-      if (f5 !== NULL) el.push(node(f5, depth + 1));
-      const r = { type: "ArrayPattern", start, end, elements: el };
-      if (_isTs) {
-        r.decorators = nodeArr(f1, f2, depth + 1);
-        r.optional = !!(flags & 1);
-        r.typeAnnotation = f6 !== NULL ? node(f6, depth + 1) : null;
-      }
-      return r;
- }
-    case 72: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6];
-      const pr = nodeArr(f3, f4, depth + 1);
-      if (f5 !== NULL) pr.push(node(f5, depth + 1));
-      const r = { type: "ObjectPattern", start, end, properties: pr };
-      if (_isTs) {
-        r.decorators = nodeArr(f1, f2, depth + 1);
-        r.optional = !!(flags & 1);
-        r.typeAnnotation = f6 !== NULL ? node(f6, depth + 1) : null;
-      }
-      return r;
- }
-    case 73: { const f1 = _u32[b + 1], f2 = _u32[b + 2];
-      const r = {
-        type: "Property", start, end,
-        kind: "init",
-        key: node(f1, depth + 1), value: node(f2, depth + 1),
-        method: false,
-        shorthand: !!(flags & 1),
-        computed: !!(flags & 2),
-      }; if (_isTs) { r.optional = false; } return r; }
-    case 74: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return {
-      type: "Program", start, end,
-      sourceType: (flags & 1) ? "module" : "script",
-      hashbang: (flags & 4) ? {
-        type: "Hashbang",
-        start: _p(f3 - 2), end: _p(f4),
-        value: str(f3, f4),
-      } : null,
-      body: nodeArr(f1, f2, depth + 1),
-    };
- }
-    case 75: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ImportExpression", start, end, source: f1 !== NULL ? node(f1, depth + 1) : null, options: f2 !== NULL ? node(f2, depth + 1) : null, phase: (flags & 1) ? ["source", "defer"][(flags >> 1) & 1] : null }; }
-    case 76: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; const r = { type: "ImportDeclaration", start, end, specifiers: nodeArr(f1, f2, depth + 1), source: f3 !== NULL ? node(f3, depth + 1) : null, attributes: nodeArr(f4, f5, depth + 1), phase: (flags & 1) ? ["source", "defer"][(flags >> 1) & 1] : null }; if (_isTs) { r.importKind = IMPORT_EXPORT_KINDS[(flags >> 2) & 1]; } return r; }
-    case 77: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "ImportSpecifier", start, end, imported: f1 !== NULL ? node(f1, depth + 1) : null, local: f2 !== NULL ? node(f2, depth + 1) : null }; if (_isTs) { r.importKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
-    case 78: { const f1 = _u32[b + 1]; return { type: "ImportDefaultSpecifier", start, end, local: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 79: { const f1 = _u32[b + 1]; return { type: "ImportNamespaceSpecifier", start, end, local: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 80: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "ImportAttribute", start, end, key: f1 !== NULL ? node(f1, depth + 1) : null, value: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 81: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5], f6 = _u32[b + 6]; const r = { type: "ExportNamedDeclaration", start, end, declaration: f1 !== NULL ? node(f1, depth + 1) : null, specifiers: nodeArr(f2, f3, depth + 1), source: f4 !== NULL ? node(f4, depth + 1) : null, attributes: nodeArr(f5, f6, depth + 1) }; if (_isTs) { r.exportKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
-    case 82: { const f1 = _u32[b + 1]; const r = { type: "ExportDefaultDeclaration", start, end, declaration: f1 !== NULL ? node(f1, depth + 1) : null }; if (_isTs) { r.exportKind = "value"; } return r; }
-    case 83: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "ExportAllDeclaration", start, end, exported: f1 !== NULL ? node(f1, depth + 1) : null, source: f2 !== NULL ? node(f2, depth + 1) : null, attributes: nodeArr(f3, f4, depth + 1) }; if (_isTs) { r.exportKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
-    case 84: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "ExportSpecifier", start, end, local: f1 !== NULL ? node(f1, depth + 1) : null, exported: f2 !== NULL ? node(f2, depth + 1) : null }; if (_isTs) { r.exportKind = IMPORT_EXPORT_KINDS[flags & 1]; } return r; }
     case 85: { const f1 = _u32[b + 1]; return { type: "TSTypeAnnotation", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 86: { return { type: "TSAnyKeyword", start, end }; }
-    case 87: { return { type: "TSUnknownKeyword", start, end }; }
-    case 88: { return { type: "TSNeverKeyword", start, end }; }
-    case 89: { return { type: "TSVoidKeyword", start, end }; }
-    case 90: { return { type: "TSNullKeyword", start, end }; }
-    case 91: { return { type: "TSUndefinedKeyword", start, end }; }
-    case 92: { return { type: "TSStringKeyword", start, end }; }
-    case 93: { return { type: "TSNumberKeyword", start, end }; }
-    case 94: { return { type: "TSBigIntKeyword", start, end }; }
-    case 95: { return { type: "TSBooleanKeyword", start, end }; }
-    case 96: { return { type: "TSSymbolKeyword", start, end }; }
-    case 97: { return { type: "TSObjectKeyword", start, end }; }
-    case 98: { return { type: "TSIntrinsicKeyword", start, end }; }
-    case 99: { return { type: "TSThisType", start, end }; }
     case 100: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeReference", start, end, typeName: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 101: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSQualifiedName", start, end, left: f1 !== NULL ? node(f1, depth + 1) : null, right: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 102: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeQuery", start, end, exprName: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 103: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TSImportType", start, end, source: f1 !== NULL ? node(f1, depth + 1) : null, options: f2 !== NULL ? node(f2, depth + 1) : null, qualifier: f3 !== NULL ? node(f3, depth + 1) : null, typeArguments: f4 !== NULL ? node(f4, depth + 1) : null }; }
-    case 104: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "TSTypeParameter", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null, constraint: f2 !== NULL ? node(f2, depth + 1) : null, default: f3 !== NULL ? node(f3, depth + 1) : null, in: !!(flags & 1), out: !!(flags & 2), const: !!(flags & 4) }; }
-    case 105: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeParameterDeclaration", start, end, params: nodeArr(f1, f2, depth + 1) }; }
-    case 106: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeParameterInstantiation", start, end, params: nodeArr(f1, f2, depth + 1) }; }
-    case 107: { const f1 = _u32[b + 1]; return { type: "TSLiteralType", start, end, literal: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 108: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TSTemplateLiteralType", start, end, quasis: nodeArr(f1, f2, depth + 1), types: nodeArr(f3, f4, depth + 1) }; }
-    case 109: { const f1 = _u32[b + 1]; return { type: "TSArrayType", start, end, elementType: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 110: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSIndexedAccessType", start, end, objectType: f1 !== NULL ? node(f1, depth + 1) : null, indexType: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 111: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTupleType", start, end, elementTypes: nodeArr(f1, f2, depth + 1) }; }
-    case 112: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSNamedTupleMember", start, end, label: f1 !== NULL ? node(f1, depth + 1) : null, elementType: f2 !== NULL ? node(f2, depth + 1) : null, optional: !!(flags & 1) }; }
-    case 113: { const f1 = _u32[b + 1]; return { type: "TSOptionalType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 114: { const f1 = _u32[b + 1]; return { type: "TSRestType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 115: { const f1 = _u32[b + 1]; return { type: "TSJSDocNullableType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null, postfix: !!(flags & 1) }; }
-    case 116: { const f1 = _u32[b + 1]; return { type: "TSJSDocNonNullableType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null, postfix: !!(flags & 1) }; }
-    case 117: { return { type: "TSJSDocUnknownType", start, end }; }
-    case 118: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSUnionType", start, end, types: nodeArr(f1, f2, depth + 1) }; }
-    case 119: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSIntersectionType", start, end, types: nodeArr(f1, f2, depth + 1) }; }
-    case 120: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "TSConditionalType", start, end, checkType: f1 !== NULL ? node(f1, depth + 1) : null, extendsType: f2 !== NULL ? node(f2, depth + 1) : null, trueType: f3 !== NULL ? node(f3, depth + 1) : null, falseType: f4 !== NULL ? node(f4, depth + 1) : null }; }
-    case 121: { const f1 = _u32[b + 1]; return { type: "TSInferType", start, end, typeParameter: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 122: { const f1 = _u32[b + 1]; return { type: "TSTypeOperator", start, end, operator: TS_TYPE_OPERATORS[flags & 3], typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 123: { const f1 = _u32[b + 1]; return { type: "TSParenthesizedType", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 124: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
-      type: "TSFunctionType", start, end,
-      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
-      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
-      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
-    };
- }
-    case 125: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
-      type: "TSConstructorType", start, end,
-      abstract: !!(flags & 1),
-      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
-      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
-      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
-    };
- }
-    case 126: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypePredicate", start, end, parameterName: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null, asserts: !!(flags & 1) }; }
-    case 127: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeLiteral", start, end, members: nodeArr(f1, f2, depth + 1) }; }
-    case 128: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return {
-      type: "TSMappedType", start, end,
-      key: node(f1, depth + 1),
-      constraint: node(f2, depth + 1),
-      nameType: f3 !== NULL ? node(f3, depth + 1) : null,
-      typeAnnotation: f4 !== NULL ? node(f4, depth + 1) : null,
-      optional: TS_MAPPED_OPTIONAL[(flags >> 0) & 3],
-      readonly: TS_MAPPED_READONLY[(flags >> 2) & 3],
-    };
- }
-    case 129: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; const r = { type: "TSPropertySignature", start, end, key: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null, computed: !!(flags & 1), optional: !!(flags & 2), readonly: !!(flags & 4) }; if (_isTs) { r.accessibility = null; r.static = false; } return r; }
-    case 130: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return {
-      type: "TSMethodSignature", start, end,
-      key: node(f1, depth + 1),
-      computed: !!(flags & 4),
-      optional: !!(flags & 8),
-      kind: TS_METHOD_SIGNATURE_KINDS[(flags >> 0) & 3],
-      typeParameters: f2 !== NULL ? node(f2, depth + 1) : null,
-      params: f3 !== NULL ? fnParams(f3, depth + 1) : [],
-      returnType: f4 !== NULL ? node(f4, depth + 1) : null,
-      accessibility: null, readonly: false, static: false,
-    };
- }
-    case 131: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
-      type: "TSCallSignatureDeclaration", start, end,
-      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
-      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
-      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
-    };
- }
-    case 132: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return {
-      type: "TSConstructSignatureDeclaration", start, end,
-      typeParameters: f1 !== NULL ? node(f1, depth + 1) : null,
-      params: f2 !== NULL ? fnParams(f2, depth + 1) : [],
-      returnType: f3 !== NULL ? node(f3, depth + 1) : null,
-    };
- }
-    case 133: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; const r = { type: "TSIndexSignature", start, end, parameters: nodeArr(f1, f2, depth + 1), typeAnnotation: f3 !== NULL ? node(f3, depth + 1) : null, readonly: !!(flags & 1) }; if (_isTs) { r.static = !!(flags & 2); r.accessibility = null; } return r; }
-    case 134: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; return { type: "TSTypeAliasDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, typeParameters: f2 !== NULL ? node(f2, depth + 1) : null, typeAnnotation: f3 !== NULL ? node(f3, depth + 1) : null, declare: !!(flags & 1) }; }
-    case 135: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4], f5 = _u32[b + 5]; return { type: "TSInterfaceDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, typeParameters: f2 !== NULL ? node(f2, depth + 1) : null, extends: nodeArr(f3, f4, depth + 1), body: f5 !== NULL ? node(f5, depth + 1) : null, declare: !!(flags & 1) }; }
-    case 136: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSInterfaceBody", start, end, body: nodeArr(f1, f2, depth + 1) }; }
-    case 137: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSInterfaceHeritage", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 138: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSClassImplements", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 139: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSEnumDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, body: f2 !== NULL ? node(f2, depth + 1) : null, const: !!(flags & 1), declare: !!(flags & 2) }; }
-    case 140: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSEnumBody", start, end, members: nodeArr(f1, f2, depth + 1) }; }
-    case 141: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSEnumMember", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, initializer: f2 !== NULL ? node(f2, depth + 1) : null, computed: !!(flags & 1) }; }
-    case 142: { const f1 = _u32[b + 1], f2 = _u32[b + 2];
-      const r = {
-        type: "TSModuleDeclaration", start, end,
-        id: node(f1, depth + 1),
-        kind: TS_MODULE_KINDS[(flags >> 0) & 1],
-        declare: !!(flags & 2),
-        global: false,
-      };
-      if (f2 !== NULL) r.body = node(f2, depth + 1);
-      return r;
- }
-    case 143: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSModuleBlock", start, end, body: nodeArr(f1, f2, depth + 1) }; }
-    case 144: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return {
-      type: "TSModuleDeclaration", start, end,
-      id: node(f1, depth + 1), body: node(f2, depth + 1),
-      kind: "global",
-      declare: !!(flags & 1),
-      global: true,
-    };
- }
-    case 145: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3]; const r = { type: "TSParameterProperty", start, end, decorators: nodeArr(f1, f2, depth + 1), parameter: f3 !== NULL ? node(f3, depth + 1) : null, override: !!(flags & 1), readonly: !!(flags & 2), accessibility: ACCESSIBILITY[(flags >> 2) & 3] }; if (_isTs) { r.static = false; } return r; }
-    case 146: { const f1 = _u32[b + 1]; return {
-      type: "Identifier", start, end,
-      decorators: [],
-      name: "this", optional: false,
-      typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null,
-    };
- }
-    case 147: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSAsExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 148: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSSatisfiesExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeAnnotation: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 149: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSTypeAssertion", start, end, typeAnnotation: f1 !== NULL ? node(f1, depth + 1) : null, expression: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 150: { const f1 = _u32[b + 1]; return { type: "TSNonNullExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 151: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSInstantiationExpression", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null, typeArguments: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 152: { const f1 = _u32[b + 1]; return { type: "TSExportAssignment", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 153: { const f1 = _u32[b + 1]; return { type: "TSNamespaceExportDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 154: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "TSImportEqualsDeclaration", start, end, id: f1 !== NULL ? node(f1, depth + 1) : null, moduleReference: f2 !== NULL ? node(f2, depth + 1) : null, importKind: IMPORT_EXPORT_KINDS[flags & 1] }; }
-    case 155: { const f1 = _u32[b + 1]; return { type: "TSExternalModuleReference", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 156: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "JSXElement", start, end, openingElement: f1 !== NULL ? node(f1, depth + 1) : null, children: nodeArr(f2, f3, depth + 1), closingElement: f4 !== NULL ? node(f4, depth + 1) : null }; }
-    case 157: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; const r = { type: "JSXOpeningElement", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null, attributes: nodeArr(f3, f4, depth + 1), selfClosing: !!(flags & 1) }; if (_isTs) { r.typeArguments = f2 !== NULL ? node(f2, depth + 1) : null; } return r; }
-    case 158: { const f1 = _u32[b + 1]; return { type: "JSXClosingElement", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 159: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4]; return { type: "JSXFragment", start, end, openingFragment: f1 !== NULL ? node(f1, depth + 1) : null, children: nodeArr(f2, f3, depth + 1), closingFragment: f4 !== NULL ? node(f4, depth + 1) : null }; }
-    case 160: { return { type: "JSXOpeningFragment", start, end }; }
-    case 161: { return { type: "JSXClosingFragment", start, end }; }
-    case 162: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXIdentifier", start, end, name: str(f1, f2) }; }
-    case 163: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXNamespacedName", start, end, namespace: f1 !== NULL ? node(f1, depth + 1) : null, name: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 164: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXMemberExpression", start, end, object: f1 !== NULL ? node(f1, depth + 1) : null, property: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 165: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return { type: "JSXAttribute", start, end, name: f1 !== NULL ? node(f1, depth + 1) : null, value: f2 !== NULL ? node(f2, depth + 1) : null }; }
-    case 166: { const f1 = _u32[b + 1]; return { type: "JSXSpreadAttribute", start, end, argument: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 167: { const f1 = _u32[b + 1]; return { type: "JSXExpressionContainer", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 168: { return { type: "JSXEmptyExpression", start, end }; }
-    case 169: { const f1 = _u32[b + 1], f2 = _u32[b + 2], f3 = _u32[b + 3], f4 = _u32[b + 4];
-      const value = str(f1, f2);
-      return { type: "JSXText", start, end, value, raw: str(f3, f4) };
- }
-    case 170: { const f1 = _u32[b + 1]; return { type: "JSXSpreadChild", start, end, expression: f1 !== NULL ? node(f1, depth + 1) : null }; }
-    case 171: { const f1 = _u32[b + 1], f2 = _u32[b + 2]; return shaped(shapes[flags], start, end, nodeArrHoles(f1, f2, depth + 1)); }
+    default: return KIND_DECODERS[tag](_decoder, i, b, flags, start, end, depth);
     }
   }
   const _inner = _attached ? nodeWithComments : _decode;
@@ -1256,6 +1431,7 @@ function decode(buffer, source, path, shapes) {
     }
     return _nodeIndexes.get(n);
   }
+  const _decoder = { _isTs, _p, _src, _u32, fnParams, node, nodeArr, nodeArrHoles, shapes, str };
   const _nodesU32 = _nodesOff >> 2;
   function startOf(i) { return _p(_u32[_nodesU32 + i * 12 + 10]); }
   function endOf(i) { return _p(_u32[_nodesU32 + i * 12 + 11]); }

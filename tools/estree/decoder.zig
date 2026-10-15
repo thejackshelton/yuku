@@ -36,6 +36,7 @@ pub fn generate(w: *Writer) Writer.Error!void {
     try writeChildTables(w);
     try writeBuildPosMap(w);
     try writeShaped(w);
+    try writeKindDecoders(w);
     try writeDecodeOpen(w);
     try writeNodeFunction(w);
     try writeDecodeBody(w);
@@ -519,6 +520,12 @@ fn writeNodeFunction(w: *Writer) !void {
         \\  }
         \\
     );
+    try w.writeAll("  const _decoder = { ");
+    inline for (decoder_fields, 0..) |name, k| {
+        if (k > 0) try w.writeAll(", ");
+        try w.writeAll(name);
+    }
+    try w.writeAll(" };\n");
     try w.print(
         \\  const _nodesU32 = _nodesOff >> 2;
         \\  function startOf(i) {{ return _p(_u32[_nodesU32 + i * {[stride]d} + {[ss]d}]); }}
@@ -767,8 +774,62 @@ fn usesIdent(body: []const u8, name: []const u8) bool {
     return false;
 }
 
-fn writeCaseOpen(w: *Writer, comptime tag: usize, comptime T: type, body: []const u8) !void {
-    try w.print("    case {d}: {{", .{tag});
+// kinds that each make up at least 1% of the nodes in real code decode inline in `_decode`
+// every other kind decodes in a function of its own, so when a pretenuring change discards
+// optimized code, V8 recompiles one small function instead of the whole switch
+const inline_kinds = [_][]const u8{
+    "identifier_reference",  "identifier_name",     "member_expression",
+    "call_expression",       "binding_identifier",  "string_literal",
+    "expression_statement",  "numeric_literal",     "object_property",
+    "ts_type_reference",     "variable_declarator", "variable_declaration",
+    "binary_expression",     "ts_type_annotation",  "formal_parameter",
+    "block_statement",       "if_statement",        "function_body",
+    "assignment_expression", "return_statement",    "logical_expression",
+};
+
+// the `decode` closure values a kind decoder reads, which it receives as one object
+const decoder_fields = [_][]const u8{
+    "_isTs", "_p",      "_src",         "_u32",   "fnParams",
+    "node",  "nodeArr", "nodeArrHoles", "shapes", "str",
+};
+
+fn isInlineKind(comptime name: []const u8) bool {
+    inline for (inline_kinds) |kind| {
+        if (comptime std.mem.eql(u8, kind, name)) return true;
+    }
+    return false;
+}
+
+// unique per kind, where ESTree types repeat across kinds
+fn kindDecoderName(comptime name: []const u8) []const u8 {
+    if (comptime std.mem.startsWith(u8, name, "jsx_")) {
+        return "_decodeJSX" ++ meta.snakeConvert(name[4..], true);
+    }
+    if (comptime std.mem.startsWith(u8, name, "ts_")) {
+        return "_decodeTS" ++ meta.snakeConvert(name[3..], true);
+    }
+    return "_decode" ++ meta.snakeConvert(name, true);
+}
+
+fn writeNodeBody(w: *Writer, comptime name: []const u8, comptime Payload: type) !void {
+    if (comptime std.mem.eql(u8, name, "dialect")) {
+        try w.writeAll("return shaped(shapes[flags], start, end, nodeArrHoles(f1, f2));");
+    } else if (comptime specialChildKeysOf(name) != null) {
+        try writeSpecialCase(w, name);
+    } else {
+        try writeGenericCase(w, name, Payload);
+    }
+}
+
+fn usesSlot(comptime T: type, body: []const u8) bool {
+    if (@typeInfo(T) != .@"struct") return false;
+    inline for (0..comptime rt.totalU32Slots(T)) |k| {
+        if (usesIdent(body, std.fmt.comptimePrint("f{d}", .{k + 1}))) return true;
+    }
+    return false;
+}
+
+fn writeSlotLoads(w: *Writer, comptime T: type, body: []const u8) !void {
     if (@typeInfo(T) == .@"struct") {
         const n = comptime rt.totalU32Slots(T);
         var first = true;
@@ -788,19 +849,68 @@ fn writeNodeCases(w: *Writer) !void {
     @setEvalBranchQuota(100_000);
     var body_buf: [16 * 1024]u8 = undefined;
     inline for (node_data.field_names, node_data.field_types, 0..) |node_name, Payload, tag| {
+        if (comptime !isInlineKind(node_name)) continue;
         var body_w: Writer = .fixed(&body_buf);
-        if (comptime std.mem.eql(u8, node_name, "dialect")) {
-            try body_w.writeAll("return shaped(shapes[flags], start, end, nodeArrHoles(f1, f2));");
-        } else if (comptime specialChildKeysOf(node_name) != null) {
-            try writeSpecialCase(&body_w, node_name);
-        } else {
-            try writeGenericCase(&body_w, node_name, Payload);
-        }
+        try writeNodeBody(&body_w, node_name, Payload);
         const body = body_w.buffered();
-        try writeCaseOpen(w, tag, Payload, body);
+        try w.print("    case {d}: {{", .{tag});
+        try writeSlotLoads(w, Payload, body);
         try writeChildCallsWithDepth(w, body);
         try w.writeAll(" }\n");
     }
+    try w.writeAll(
+        \\    default: return KIND_DECODERS[tag](_decoder, i, b, flags, start, end, depth);
+        \\
+    );
+}
+
+fn writeKindDecoders(w: *Writer) !void {
+    @setEvalBranchQuota(200_000);
+    comptime {
+        // `_decode` reads the tag as the low byte of the node header
+        std.debug.assert(node_data.field_names.len <= 256);
+        std.debug.assert(inline_kinds.len < node_data.field_names.len);
+        for (inline_kinds, 0..) |kind, k| {
+            std.debug.assert(@hasField(ast.NodeData, kind));
+            for (inline_kinds[0..k]) |earlier| std.debug.assert(!std.mem.eql(u8, earlier, kind));
+        }
+    }
+    var body_buf: [16 * 1024]u8 = undefined;
+    inline for (node_data.field_names, node_data.field_types) |node_name, Payload| {
+        if (comptime isInlineKind(node_name)) continue;
+        var body_w: Writer = .fixed(&body_buf);
+        try writeNodeBody(&body_w, node_name, Payload);
+        const body = body_w.buffered();
+        try w.print("function {s}(decoder, i, b, flags, start, end, depth) {{", .{
+            comptime kindDecoderName(node_name),
+        });
+        try writeKindDecoderFields(w, Payload, body);
+        try writeSlotLoads(w, Payload, body);
+        try writeChildCallsWithDepth(w, body);
+        try w.writeAll(" }\n");
+    }
+    try w.writeAll("const KIND_DECODERS = [\n");
+    inline for (node_data.field_names) |node_name| {
+        if (comptime isInlineKind(node_name)) {
+            try w.writeAll("  null,\n");
+        } else {
+            try w.print("  {s},\n", .{comptime kindDecoderName(node_name)});
+        }
+    }
+    try w.writeAll("];\n");
+}
+
+fn writeKindDecoderFields(w: *Writer, comptime T: type, body: []const u8) !void {
+    var first = true;
+    inline for (decoder_fields) |name| {
+        const slot_view = comptime std.mem.eql(u8, name, "_u32");
+        if (usesIdent(body, name) or (slot_view and usesSlot(T, body))) {
+            try w.writeAll(if (first) " const { " else ", ");
+            first = false;
+            try w.writeAll(name);
+        }
+    }
+    if (!first) try w.writeAll(" } = decoder;");
 }
 
 fn writeChildCallsWithDepth(w: *Writer, body: []const u8) !void {
