@@ -2,6 +2,24 @@
 
 What changed in each release of Yuku, newest first. Releases up to 0.14.0 are listed on [GitHub](https://github.com/yuku-toolchain/yuku/releases).
 
+## 0.20.0
+
+### Breaking
+
+- Yuku now ships as one package, `yuku`, in place of `yuku-parser`, `yuku-analyzer`, `yuku-ast`, `yuku-codegen`, and `@yuku-toolchain/types`. Install `yuku` and import from `yuku`, `yuku/analyzer`, `yuku/ast`, `yuku/codegen`, and `yuku/types` (#225 by @arshad-yaseen)
+- `yuku-core`, `@yuku-core/wasm`, and the `@yuku-core/binding-*` native packages are removed, since everything runs on the WebAssembly module inside `yuku` (#225 by @arshad-yaseen)
+- Node.js 16.4 or newer is required, and browsers need WebAssembly SIMD, such as Safari 16.4 or newer (#225 by @arshad-yaseen)
+- `yuku/types` no longer exports `Core` (#225 by @arshad-yaseen)
+- Zig: `-Dparser-extension` is replaced by `-Ddialect`, the semantic traverser's `Ctx.init` and `SymbolTracker.init` take a mode, and `Ctx.parentOf` is removed (#225 by @thejackshelton and @arshad-yaseen)
+
+### Changes
+
+- Dialects let you add your own syntax to the parser in Zig, matched to files by extension and passed to `parse` and `analyze` through the `wasm` option (#225 by @thejackshelton and @arshad-yaseen)
+- Yuku runs unchanged in Node.js, Bun, Deno, browsers, and Workers, with no setup before the first parse (#225 by @arshad-yaseen)
+- Parsing is 13 to 22% faster (#225 by @arshad-yaseen)
+- `semanticErrors` is 29 to 49% cheaper, since it skips the full semantic model (#225 by @arshad-yaseen)
+- Repeated calls reuse memory, so batches that mix large and small files run much faster (#250, #225 by @arshad-yaseen)
+
 ## 0.19.0
 
 ### Breaking
