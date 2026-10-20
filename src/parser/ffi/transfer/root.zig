@@ -9,6 +9,7 @@
 //   strings            string_pool_len bytes of UTF-8, zero-padded to a 4-byte boundary
 //   comments           comment_count PackedComment in source order
 //   tokens             token_count ast.Token, each as is
+//   dialect            dialect_len u32, what the dialect writes for its JavaScript
 //   diagnostics        diag_count variable-length entries
 //
 // node fields
@@ -48,6 +49,7 @@ pub const Header = extern struct {
     program_index: u32,
     flags: u32,
     first_non_ascii: u32,
+    dialect_len: u32,
 };
 
 pub const PackedNode = extern struct {
@@ -149,7 +151,8 @@ pub fn bufferSize(tree: *const ast.Tree) usize {
         tree.extras.items.len * 4 +
         std.mem.alignForward(usize, tree.strings.extra.items.len, 4) +
         tree.comments.len * @sizeOf(PackedComment) +
-        tree.tokens.len * @sizeOf(ast.Token);
+        tree.tokens.len * @sizeOf(ast.Token) +
+        tree.dialect_data.items.len * 4;
 
     for (tree.diagnostics.items) |d| {
         size += diag_fixed + d.message.len;
@@ -184,6 +187,7 @@ pub fn serializeInto(tree: *const ast.Tree, buf: []u8) usize {
         .program_index = @backingInt(tree.root),
         .flags = hdr_flags,
         .first_non_ascii = @intCast(firstNonAsciiOffset(tree.source)),
+        .dialect_len = @intCast(tree.dialect_data.items.len),
     };
     var pos: usize = 0;
     writeBytes(buf, &pos, std.mem.asBytes(&hdr));
@@ -219,6 +223,7 @@ pub fn serializeInto(tree: *const ast.Tree, buf: []u8) usize {
     pos += tree.comments.len * @sizeOf(PackedComment);
 
     writeBytes(buf, &pos, std.mem.sliceAsBytes(tree.tokens));
+    writeBytes(buf, &pos, std.mem.sliceAsBytes(tree.dialect_data.items));
 
     for (tree.diagnostics.items) |d| {
         writeBytes(buf, &pos, &.{@backingInt(d.severity)});

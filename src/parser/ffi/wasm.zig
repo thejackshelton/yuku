@@ -13,6 +13,7 @@ const flag = struct {
     const attach_comments = 1 << 7;
     const tokens = 1 << 8;
     const dialect = 1 << 9;
+    const dialect_flags_shift = 16;
 };
 
 // static, so the host reads it without freeing
@@ -76,6 +77,7 @@ fn parseTree(source: []const u8, flags: u32) !parser.ast.Tree {
         .comments = if (flags & flag.attach_comments != 0) .attach else .collect,
         .tokens = flags & flag.tokens != 0,
         .dialect = flags & flag.dialect != 0,
+        .dialect_flags = @truncate(flags >> flag.dialect_flags_shift),
     });
 }
 

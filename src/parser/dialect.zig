@@ -182,6 +182,17 @@ pub const Parser = struct {
         return self.inner.current_token;
     }
 
+    /// The `dialectFlags` the source is parsed with, the dialect's own to define.
+    pub inline fn flags(self: *const Parser) u16 {
+        return self.inner.dialect_flags;
+    }
+
+    /// Words for the dialect's JavaScript, which reads them as `ParseResult.dialect`, rewound
+    /// with the parser.
+    pub inline fn output(self: *const Parser) *std.ArrayList(u32) {
+        return &self.inner.tree.dialect_data;
+    }
+
     /// Lexes the token at or after `offset` in the current mode, without moving or reporting.
     pub fn tokenAt(self: *const Parser, offset: u32) ast.Token {
         std.debug.assert(offset <= self.inner.source.len);

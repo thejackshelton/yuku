@@ -583,7 +583,9 @@ fn writeDecode(w: *Writer) !void {
         \\  const _spOff = eOff + extraCount * 4;
         \\  const _cOff = _spOff + ((spLen + 3) & ~3);
         \\  const _tOff = _cOff + commentCount * {[comment_size]d};
-        \\  const dOff = _tOff + tokenCount * {[token_size]d};
+        \\  const _dialectOff = _tOff + tokenCount * {[token_size]d};
+        \\  const dialectLen = _u32[{[dialect_len]d}];
+        \\  const dOff = _dialectOff + dialectLen * 4;
         \\  // the string pool and the diagnostics are bytes, the other sections 32-bit words
         \\  if (BIG_ENDIAN) {{
         \\    _hostOrder(_u32, _nodesOff >> 2, _spOff >> 2);
@@ -702,6 +704,7 @@ fn writeDecode(w: *Writer) !void {
         .token_count = word(rt.Header, "token_count"),
         .flags = word(rt.Header, "flags"),
         .first_non_ascii = word(rt.Header, "first_non_ascii"),
+        .dialect_len = word(rt.Header, "dialect_len"),
         .ts = rt.FLAG_TS,
         .attached = rt.FLAG_ATTACHED_COMMENTS,
         .semantic = rt.FLAG_SEMANTIC,
@@ -938,6 +941,7 @@ fn writeDecode(w: *Writer) !void {
         \\        ? _diagnostics
         \\        : (_diagnostics = _decodeDiagnostics());
         \\    },
+        \\    dialect: dialectLen === 0 ? undefined : _u8.subarray(_dialectOff, dOff),
         \\  };
         \\  if (!_hasSemantic) return result;
         \\  result.nodeOf = node;

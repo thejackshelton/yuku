@@ -138,7 +138,7 @@ function flagsOf(options: ParseOptions, dialect: Dialect | null): number {
   if (options.semanticErrors) flags |= 1 << 6;
   if (options.attachComments) flags |= 1 << 7;
   if (options.tokens) flags |= 1 << 8;
-  if (file !== undefined) flags |= 1 << 9;
+  if (file !== undefined) flags |= (1 << 9) | ((options.dialectFlags ?? 0) << 16);
   return flags;
 }
 

@@ -27,6 +27,8 @@ pub const Options = struct {
     tokens: bool = false,
     /// Whether the dialect compiled into the parser reads this source.
     dialect: bool = false,
+    /// Options of the dialect's own, read with `dialect.Parser.flags`.
+    dialect_flags: u16 = 0,
 };
 
 pub const Context = packed struct {
@@ -71,6 +73,7 @@ pub const Parser = struct {
     comment_mode: CommentMode,
     collect_tokens: bool,
     dialect: bool,
+    dialect_flags: u16,
     lexer: lexer.Lexer,
     diagnostics: std.ArrayList(ast.Diagnostic) = .empty,
     tokens: std.ArrayList(Token) = .empty,
@@ -305,6 +308,7 @@ pub const Parser = struct {
             .extras_len = self.tree.extras.items.len,
             .diagnostics_len = self.diagnostics.items.len,
             .tokens_len = self.tokens.items.len,
+            .dialect_data_len = self.tree.dialect_data.items.len,
             .context = self.context,
             .ts_context = self.ts_context,
             .state = self.state,
@@ -323,6 +327,7 @@ pub const Parser = struct {
         self.tree.extras.shrinkRetainingCapacity(cp.extras_len);
         self.diagnostics.shrinkRetainingCapacity(cp.diagnostics_len);
         self.tokens.shrinkRetainingCapacity(cp.tokens_len);
+        self.tree.dialect_data.shrinkRetainingCapacity(cp.dialect_data_len);
         self.context = cp.context;
         self.ts_context = cp.ts_context;
         self.state = cp.state;
@@ -541,6 +546,7 @@ pub const Checkpoint = struct {
     extras_len: usize,
     diagnostics_len: usize,
     tokens_len: usize,
+    dialect_data_len: usize,
 
     context: Context,
     ts_context: TsContext,
@@ -585,6 +591,7 @@ pub fn parse(
         .comment_mode = options.comments,
         .collect_tokens = options.tokens,
         .dialect = options.dialect,
+        .dialect_flags = options.dialect_flags,
         .lexer = undefined,
         .current_token = Token.eof(0),
     };

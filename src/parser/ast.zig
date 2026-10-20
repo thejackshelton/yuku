@@ -138,6 +138,8 @@ pub const Tree = struct {
     comment_index: CommentIndex = .{},
     /// Every token in source order, ending with `eof`, when `Options.tokens` is set.
     tokens: []const Token = &.{},
+    /// What the dialect writes for its JavaScript, read there as `ParseResult.dialect`.
+    dialect_data: std.ArrayList(u32) = .empty,
     arena: std.heap.ArenaAllocator,
     /// Empty for trees built with `initEmpty()`.
     source: []const u8 = "",

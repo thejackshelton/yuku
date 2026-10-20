@@ -28,6 +28,8 @@ export interface ParseOptions extends FileOptions {
   attachComments?: boolean;
   /** Keep every token in {@link ParseResult.tokens}. @default false */
   tokens?: boolean;
+  /** Options of the dialect's own, 16 bits it reads with `dialect.Parser.flags`. @default 0 */
+  dialectFlags?: number;
 }
 
 export interface ParseResult {
@@ -37,6 +39,8 @@ export interface ParseResult {
   /** Every token, with {@link ParseOptions.tokens}. */
   tokens?: TokenList;
   diagnostics: Diagnostic[];
+  /** What the dialect writes with `dialect.Parser.output`, when it writes anything. */
+  dialect?: Uint8Array;
 }
 
 /** Every token kind by name. */

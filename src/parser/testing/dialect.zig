@@ -69,6 +69,8 @@ pub fn expression(p: *Parser) Error!Claim {
     }
     if (token.tag != .percent) return .decline;
     if (!try p.advance()) return .failed;
+    // with dialect flag 1, where each topic starts, for the JavaScript
+    if (p.flags() & 1 != 0) try p.output().append(p.tree().allocator(), token.span.start);
     return claimed(try p.addNode(.topic, &.{}, token.span));
 }
 

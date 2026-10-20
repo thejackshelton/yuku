@@ -57,3 +57,9 @@ test("the dialect reads its own files, and other files and a given lang parse as
   expect(parse(source, { wasm, path: "a.js" }).diagnostics.length).toBeGreaterThan(0);
   expect(parse(source, { wasm, lang: "jsx" }).diagnostics.length).toBeGreaterThan(0);
 });
+
+test("the dialect reads its flags and writes for its JavaScript", () => {
+  const { dialect } = parse("a |> f(%, %);", { wasm, dialectFlags: 1 });
+  expect([...new Uint32Array(dialect!.buffer, dialect!.byteOffset, dialect!.length / 4)]).toEqual([7, 10]);
+  expect(parse("a |> f(%, %);", { wasm }).dialect).toBeUndefined();
+});

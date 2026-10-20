@@ -1111,7 +1111,7 @@ const KIND_DECODERS = [
 function decode(buffer, source, path, shapes) {
   const _u8 = new Uint8Array(buffer);
   const _u32 = new Int32Array(buffer, 0, buffer.byteLength >> 2);
-  if (BIG_ENDIAN) _hostOrder(_u32, 0, 10);
+  if (BIG_ENDIAN) _hostOrder(_u32, 0, 11);
   const _src = source;
   const _srcLen = _u32[3];
   const nodeCount = _u32[0],
@@ -1126,13 +1126,15 @@ function decode(buffer, source, path, shapes) {
   const _attached = !!(_flags & 2);
   const _hasSemantic = !!(_flags & 8);
   const _firstNa = _u32[9];
-  const _nodesOff = 40;
+  const _nodesOff = 44;
   const eOff = _nodesOff + nodeCount * 48;
   const _extraBase = eOff >> 2;
   const _spOff = eOff + extraCount * 4;
   const _cOff = _spOff + ((spLen + 3) & ~3);
   const _tOff = _cOff + commentCount * 24;
-  const dOff = _tOff + tokenCount * 16;
+  const _dialectOff = _tOff + tokenCount * 16;
+  const dialectLen = _u32[10];
+  const dOff = _dialectOff + dialectLen * 4;
   // the string pool and the diagnostics are bytes, the other sections 32-bit words
   if (BIG_ENDIAN) {
     _hostOrder(_u32, _nodesOff >> 2, _spOff >> 2);
@@ -1195,7 +1197,7 @@ function decode(buffer, source, path, shapes) {
     return r;
   }
   function fnParams(idx, depth) {
-    const pb = idx * 12 + 10;
+    const pb = idx * 12 + 11;
     const len = _u32[pb + 2];
     const iStart = _u32[pb + 1], rest = _u32[pb + 3];
     const p = new Array(rest !== NULL ? len + 1 : len);
@@ -1230,7 +1232,7 @@ function decode(buffer, source, path, shapes) {
   }
   function _decode(i, depth) {
     if (depth >= DEPTH_MAX) return _deep(i);
-    const b = i * 12 + 10;
+    const b = i * 12 + 11;
     const h0 = _u32[b];
     const tag = h0 & 255;
     const flags = h0 >>> 16;
@@ -1513,6 +1515,7 @@ return { type: "Literal", start, end, value: v, raw: r }; }
         ? _diagnostics
         : (_diagnostics = _decodeDiagnostics());
     },
+    dialect: dialectLen === 0 ? undefined : _u8.subarray(_dialectOff, dOff),
   };
   if (!_hasSemantic) return result;
   result.nodeOf = node;
